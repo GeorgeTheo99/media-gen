@@ -1,0 +1,107 @@
+{
+  "schema": 1,
+  "repo_id": "black-forest-labs/FLUX.2-klein-4B",
+  "revision": "e7b7dc27f91deacad38e78976d1f2b499d76a294",
+  "files": [
+    {
+      "path": "LICENSE.md",
+      "size": 9584,
+      "git_sha1": "0afa7632c1a195ea6627a3c53e6ebf18d1be3aa5"
+    },
+    {
+      "path": "README.md",
+      "size": 9991,
+      "git_sha1": "7b3cca65056e19a6ef27bdd0be671a030f067942"
+    },
+    {
+      "path": "model_index.json",
+      "size": 446,
+      "git_sha1": "554a39bf1019138dd0b28809b745df8ef33657c8"
+    },
+    {
+      "path": "scheduler/scheduler_config.json",
+      "size": 486,
+      "git_sha1": "7e53605e2643440b310fa554f087641893883c5f"
+    },
+    {
+      "path": "text_encoder/config.json",
+      "size": 1536,
+      "git_sha1": "86f951d170cfd1fdc1c8a57a041e05c27b7b789b"
+    },
+    {
+      "path": "text_encoder/generation_config.json",
+      "size": 214,
+      "git_sha1": "f5af93d0c7764fa38e3b1cd3aaba1b6307246d3b"
+    },
+    {
+      "path": "text_encoder/model-00001-of-00002.safetensors",
+      "size": 4967215360,
+      "sha256": "8c0506e7f4936fa7e26183a4fd8da4e2bdbc5990ba64ae441f965d51228f36ea"
+    },
+    {
+      "path": "text_encoder/model-00002-of-00002.safetensors",
+      "size": 3077766632,
+      "sha256": "82f2bd839378541b0557bfabaf37c7d3d637071fdcb73302dedd7cf61162ce07"
+    },
+    {
+      "path": "text_encoder/model.safetensors.index.json",
+      "size": 32855,
+      "git_sha1": "b65d8063815c8679d85bb919337b36fae8de75cf"
+    },
+    {
+      "path": "tokenizer/added_tokens.json",
+      "size": 707,
+      "git_sha1": "b54f9135e44c1e81047e8d05cb027af8bc039eed"
+    },
+    {
+      "path": "tokenizer/chat_template.jinja",
+      "size": 4168,
+      "git_sha1": "01be9b307daa2d425f7c168c9fb145a286e0afb4"
+    },
+    {
+      "path": "tokenizer/merges.txt",
+      "size": 1671853,
+      "git_sha1": "31349551d90c7606f325fe0f11bbb8bd5fa0d7c7"
+    },
+    {
+      "path": "tokenizer/special_tokens_map.json",
+      "size": 613,
+      "git_sha1": "ac23c0aaa2434523c494330aeb79c58395378103"
+    },
+    {
+      "path": "tokenizer/tokenizer.json",
+      "size": 11422654,
+      "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
+    },
+    {
+      "path": "tokenizer/tokenizer_config.json",
+      "size": 5404,
+      "git_sha1": "ddaf69808214a44fdd26d3785b66c1367c78277a"
+    },
+    {
+      "path": "tokenizer/vocab.json",
+      "size": 2776833,
+      "git_sha1": "4783fe10ac3adce15ac8f358ef5462739852c569"
+    },
+    {
+      "path": "transformer/config.json",
+      "size": 541,
+      "git_sha1": "f21592ae2bc9f43052e78785bde7414f219ae369"
+    },
+    {
+      "path": "transformer/diffusion_pytorch_model.safetensors",
+      "size": 7751109744,
+      "sha256": "9f29f9edcfdae452a653ffb51a534ca4decd389952c225724ff3b94042612a6e"
+    },
+    {
+      "path": "vae/config.json",
+      "size": 821,
+      "git_sha1": "c3f38eb4c188a96a462519159356bd0fcc28cd14"
+    },
+    {
+      "path": "vae/diffusion_pytorch_model.safetensors",
+      "size": 168120878,
+      "sha256": "ca70d2202afe6415bdbcb8793ba8cd99fd159cfe6192381504d6c4d3036e0f04"
+    }
+  ]
+}
