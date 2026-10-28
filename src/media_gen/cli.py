@@ -80,9 +80,13 @@ def _remove(settings: Settings, names: list[str]) -> int:
 
 
 def _serve(settings: Settings) -> int:
+    import logging
+
     import uvicorn
 
     from media_gen.api import create_app
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     uvicorn.run(create_app(settings), host=settings.host, port=settings.port, log_level="info")
     return 0

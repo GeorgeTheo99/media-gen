@@ -74,7 +74,9 @@ class MediaModel:
     license: str
     # Pinned repositories, in the order the backend expects them.
     manifests: tuple[str, ...]
-    # Unified memory needed to load the model and run its largest allowed request.
+    # Unified memory to load the model and run its largest allowed request, with headroom over
+    # the measured MLX peak (M3 Ultra): klein 16.8 GiB and Z-Image 32.6 GiB at 2048x2048,
+    # LTX-2.3 30.4 GiB for 12 s at 768x512 and for 5 s at 1280x704.
     memory_gib: int
     # Backend-specific load options, passed through to the worker.
     engine: dict[str, Any] = field(default_factory=dict)
@@ -116,7 +118,7 @@ MODELS: dict[str, MediaModel] = {
             display_name="FLUX.2 [klein] 4B",
             license="apache-2.0",
             manifests=("flux2-klein-4b",),
-            memory_gib=32,
+            memory_gib=24,
             engine={"family": "flux2", "mflux_model": "flux2-klein-4b"},
             default_steps=4,
         ),
@@ -128,11 +130,11 @@ MODELS: dict[str, MediaModel] = {
             license="ltx-2-community",
             # The unified video pack, then its Gemma 3 text encoder.
             manifests=("ltx23-mlx-av-q4", "gemma-3-12b-it-bf16"),
-            memory_gib=80,
+            memory_gib=48,
             default_size=(768, 512),
             max_pixels=1280 * 768,
             size_multiple=64,
-            max_seconds=10,
+            max_seconds=12,
             default_seconds=5,
         ),
     )

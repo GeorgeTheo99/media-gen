@@ -5,11 +5,11 @@ endpoints. Built for [Model Gateway](https://github.com/GeorgeTheo99/model-gatew
 which installs it with `model-gateway media add MODEL` and routes to it, but it
 runs on its own too.
 
-| Model | Kind | Download | Memory | Speed (M3 Ultra, 1024²) |
+| Model | Kind | Download | Memory | Speed (M3 Ultra) |
 |---|---|---|---|---|
-| `flux2-klein-4b` | image | 16 GB | 32 GiB | ~8 s |
-| `z-image-turbo` | image (strong text rendering) | 33 GB | 40 GiB | ~40 s |
-| `ltx-2.3-distilled` | video with synchronized audio | 49 GB | 80 GiB | minutes per clip |
+| `flux2-klein-4b` | image | 16 GB | 24 GiB | ~8 s at 1024² |
+| `z-image-turbo` | image (strong text rendering) | 33 GB | 40 GiB | ~40 s at 1024² |
+| `ltx-2.3-distilled` | video with synchronized audio | 49 GB | 48 GiB | ~95 s for 5 s at 768×512 |
 
 Engines: [mflux](https://github.com/filipstrand/mflux) for images and
 [mlx-video-with-audio](https://github.com/james-see/mlx-video-with-audio) for
@@ -42,8 +42,8 @@ curl -s localhost:9112/v1/videos -H 'content-type: application/json' \
   `b64_json` only. `quality`, `style`, `user` and `moderation` are accepted and
   ignored; anything else unknown is a 400.
 - `POST /v1/videos` (JSON, or multipart with an `input_reference` image for
-  image-to-video): `model`, `prompt`, `seconds` (1-10), `size` (multiples of
-  64, up to 1280×768), `seed`. Then `GET /v1/videos`, `GET /v1/videos/{id}`,
+  image-to-video): `model`, `prompt`, `seconds` (1-12), `size` (snapped to
+  multiples of 64, so `1280x720` becomes `1280x704`; up to 1280×768 pixels), `seed`. Then `GET /v1/videos`, `GET /v1/videos/{id}`,
   `GET /v1/videos/{id}/content` and `DELETE /v1/videos/{id}` (cancels a queued
   or running video). Videos expire after `MEDIA_GEN_VIDEO_RETENTION_HOURS` (24).
 - `GET /v1/models`, `GET /health`.
