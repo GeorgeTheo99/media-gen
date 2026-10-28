@@ -69,8 +69,8 @@ def test_unknown_and_wrong_kind_models_are_not_found(client):
 
 
 def test_uninstalled_curated_model_is_reported(make_client):
-    client = make_client(models={"z-image-turbo": MODELS["z-image-turbo"]})
-    response = client.post("/v1/images/generations", json={"model": "z-image-turbo", "prompt": "x"})
+    client = make_client(models={"qwen-image-2.1": MODELS["qwen-image-2.1"]})
+    response = client.post("/v1/images/generations", json={"model": "qwen-image-2.1", "prompt": "x"})
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "model_not_installed"
     listed = client.get("/v1/models").json()["data"]

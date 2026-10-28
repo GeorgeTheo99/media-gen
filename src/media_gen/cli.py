@@ -79,6 +79,34 @@ def _remove(settings: Settings, names: list[str]) -> int:
     return 0
 
 
+def _prune(settings: Settings) -> int:
+    """Delete the files of models no longer curated (a release retired them), keeping every current one."""
+    import shutil
+
+    from media_gen.catalog import COMPLETE_MARKER
+
+    current = {
+        manifest.directory(settings.models_dir)
+        for model in MODELS.values()
+        for manifest in model.resolved_manifests()
+    }
+    if not settings.models_dir.is_dir():
+        return 0
+    for repository in sorted(settings.models_dir.iterdir()):
+        if not repository.is_dir() or repository.is_symlink():
+            continue
+        for revision in sorted(repository.iterdir()):
+            # Only what `pull` wrote: a finished download's marker, or its lock while one ran.
+            ours = (revision / COMPLETE_MARKER).is_file() or (revision / ".lock").is_file()
+            if revision in current or not revision.is_dir() or revision.is_symlink() or not ours:
+                continue
+            shutil.rmtree(revision)
+            print(f"{repository.name}@{revision.name[:12]}: removed (no longer curated)", flush=True)
+        if not any(repository.iterdir()):
+            repository.rmdir()
+    return 0
+
+
 def _serve(settings: Settings) -> int:
     import logging
 
@@ -103,6 +131,7 @@ def main(argv: list[str] | None = None) -> int:
     pull.add_argument("--limit-mbps", type=int, help="download cap in megabits per second")
     remove = sub.add_parser("remove", help="delete models' files")
     remove.add_argument("models", nargs="+")
+    sub.add_parser("prune", help="delete the files of models this release no longer curates")
     args = parser.parse_args(argv)
 
     settings = Settings.from_env()
@@ -112,6 +141,8 @@ def main(argv: list[str] | None = None) -> int:
         return _pull(settings, args.models, args.limit_mbps)
     if args.command == "remove":
         return _remove(settings, args.models)
+    if args.command == "prune":
+        return _prune(settings)
     return _serve(settings)
 
 

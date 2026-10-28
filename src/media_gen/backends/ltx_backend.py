@@ -1,62 +1,77 @@
-"""Text- and image-to-video with synchronized audio: LTX-2.3 through mlx-video-with-audio."""
+"""Text- and image-to-video with synchronized audio: LTX-2.5 distilled through ltx-2-mlx."""
 
 from __future__ import annotations
 
+import os
 import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import ltx_pipelines_mlx.utils.samplers as samplers
 import mlx.core as mx
-import mlx_video.generate_av as av
+from ltx_pipelines_mlx.distilled import DistilledPipeline
 
 from media_gen.worker import BackendError
 
-# The unified pack's fixed distilled schedule: 8 stage-one plus 3 stage-two steps.
-DENOISE_STEPS = len(av.DEFAULT_STAGE_1_SIGMAS) - 1 + len(av.DEFAULT_STAGE_2_SIGMAS) - 1
+# Share of the progress bar for each denoising stage: half resolution, then the full-size refine.
+STAGES = ((0, 70), (70, 95))
+# The VAE decode's memory budget. The library's default (half of unified memory) skips tiling on a big Mac,
+# so a 10 s clip peaked at 150 GiB; a tiled decode fits under this instead.
+DECODE_BUDGET_GIB = 24
 
 
 class LtxBackend:
     def __init__(self, spec: dict[str, Any]):
-        self.model_path, self.text_encoder_path = spec["paths"]
-        if not av.is_unified_mlx_model(Path(self.model_path)):
-            raise ValueError(f"{self.model_path} is not a unified LTX MLX pack")
-        av.validate_text_encoder_config(Path(self.text_encoder_path))
+        # Read when the decode runs; this is the worker's own process.
+        os.environ.setdefault("LTX2_VAE_DECODE_BUDGET_GB", str(DECODE_BUDGET_GIB))
+        (self.model_path,) = spec["paths"]
+        # Without its bundled text encoder the library would quietly download a Gemma instead.
+        needed = ("transformer-distilled.safetensors", "text_encoder.safetensors", "text_encoder_config.json")
+        missing = [name for name in needed if not (Path(self.model_path) / name).is_file()]
+        if missing:
+            raise ValueError(f"{self.model_path} is an incomplete LTX MLX pack: missing {', '.join(missing)}")
 
     def run(self, params: dict[str, Any], progress: Callable[[float], None]) -> dict[str, Any]:
         output = Path(params["output_path"])
         # Without ffmpeg the library cannot mux audio, so ask for video only.
         has_audio = shutil.which("ffmpeg") is not None
-        steps = 0
-        library_tqdm = av.tqdm
+        stage = 0
+        # The library resets MLX's peak before its tiled decode, so each step's is kept too.
+        peak = 0
+        library_tqdm = samplers.tqdm
 
         def tracked(iterable, *args, **kwargs):
-            nonlocal steps
-            for item in library_tqdm(iterable, *args, **kwargs):
+            nonlocal stage, peak
+            start, end = STAGES[min(stage, len(STAGES) - 1)]
+            stage += 1
+            steps = list(iterable)
+            for index, item in enumerate(library_tqdm(steps, *args, **kwargs)):
                 yield item
-                steps += 1
-                progress(min(95, 95 * steps / DENOISE_STEPS))
+                peak = max(peak, mx.get_peak_memory())
+                progress(start + (end - start) * (index + 1) / len(steps))
 
-        av.tqdm = tracked
+        # The pack bundles its own Gemma text encoder, so nothing else is read.
+        pipe = DistilledPipeline(model_dir=self.model_path, low_memory=True)
+        pipe.verbose = False
+        pipe.generate_audio = has_audio
+        samplers.tqdm = tracked
         mx.reset_peak_memory()
         try:
-            av.generate_video_with_audio(
-                model_repo=self.model_path,
-                text_encoder_repo=self.text_encoder_path,
+            pipe.generate_and_save(
                 prompt=params["prompt"],
-                width=params["width"],
+                output_path=str(output),
                 height=params["height"],
+                width=params["width"],
                 num_frames=params["num_frames"],
-                fps=params["fps"],
+                frame_rate=params["fps"],
                 seed=params["seed"],
                 image=params.get("image_path"),
-                output_path=str(output),
-                no_audio=not has_audio,
-                verbose=False,
             )
         finally:
-            av.tqdm = library_tqdm
-            peak = mx.get_peak_memory()
+            samplers.tqdm = library_tqdm
+            peak = max(peak, mx.get_peak_memory())
+            del pipe
             mx.clear_cache()
         if not output.is_file() or output.stat().st_size == 0:
             raise BackendError("generation_failed", "the video pipeline finished without writing a video")

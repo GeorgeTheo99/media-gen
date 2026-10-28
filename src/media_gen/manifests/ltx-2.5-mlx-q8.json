@@ -1,0 +1,127 @@
+{
+  "schema": 1,
+  "repo_id": "dgrauet/ltx-2.5-mlx-q8",
+  "revision": "746ca9aacb697d2c739f544d68b584214dedcc75",
+  "files": [
+    {
+      "path": "LICENSE",
+      "size": 34441,
+      "git_sha1": "aa1e32a736bb14f4da11fadca8ad4507a2764edb"
+    },
+    {
+      "path": "audio_vae.safetensors",
+      "size": 106510732,
+      "sha256": "847a62b7b20691a55fe9c097f5d745eb4bbcc1f68bdeeb570140dfeec5175624"
+    },
+    {
+      "path": "chat_template.jinja",
+      "size": 17466,
+      "git_sha1": "e61bbfe9a31db79ea1e4e557b046f895ad7899d0"
+    },
+    {
+      "path": "connector.safetensors",
+      "size": 4032375032,
+      "sha256": "dd1273769b8b7ada9edd3887999c8384d2357f91cce21ad4ac09f5816b2d70d5"
+    },
+    {
+      "path": "duration_head.safetensors",
+      "size": 3808466,
+      "sha256": "9b2d78ade8aced87586523c795b8b76c6241516b8ea7bf969b6fa5818f0e1604"
+    },
+    {
+      "path": "embedded_config.json",
+      "size": 2557,
+      "git_sha1": "62f78f1aba7b1d3bdf47c8bc1557cd6bafdedae8"
+    },
+    {
+      "path": "generation_config.json",
+      "size": 255,
+      "git_sha1": "2528bb46703f6abf6489b1bd15e6a724ab4525d7"
+    },
+    {
+      "path": "processor_config.json",
+      "size": 1382,
+      "git_sha1": "b889adcd78015bf5a0139438c5fb0b7067529a61"
+    },
+    {
+      "path": "quantize_config.json",
+      "size": 213,
+      "git_sha1": "0e3a6b1e04c40e3668acb87fd98ea6e3bdf9c713"
+    },
+    {
+      "path": "spatial_upscaler_x2_v1_0.safetensors",
+      "size": 995745336,
+      "sha256": "a6306165ccd89cc55833d88cf0b8713b1a80e968bbe87fa28ac5d458403dc240"
+    },
+    {
+      "path": "spatial_upscaler_x2_v1_0_config.json",
+      "size": 275,
+      "git_sha1": "b36a7304dd0e3cbc4afc3bad766ab5a897759238"
+    },
+    {
+      "path": "split_model.json",
+      "size": 1028,
+      "git_sha1": "b6cf9f7b0aa7b728196d37806e731c680b821643"
+    },
+    {
+      "path": "temporal_upscaler_x2_v1_0.safetensors",
+      "size": 261945832,
+      "sha256": "4ec58030a2430566ee5fb4ed8b3f24500b098758f967f7c68569b7cb42aed1ea"
+    },
+    {
+      "path": "temporal_upscaler_x2_v1_0_config.json",
+      "size": 273,
+      "git_sha1": "0412cb37d391e613ac44897ce35c562745481ae0"
+    },
+    {
+      "path": "text_encoder.safetensors",
+      "size": 16013053557,
+      "sha256": "1becd18288424a5aa9d66c5e182092dde40277bcf2db38a1c64b150b85d76016"
+    },
+    {
+      "path": "text_encoder_config.json",
+      "size": 4377,
+      "git_sha1": "c6148a703195fd3dec6646b6c7db738d8d18295a"
+    },
+    {
+      "path": "tokenizer.json",
+      "size": 32169626,
+      "sha256": "cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f"
+    },
+    {
+      "path": "tokenizer_config.json",
+      "size": 2749,
+      "git_sha1": "df4afd629c3e51c2a7ef4e72b967a3f17acbffe1"
+    },
+    {
+      "path": "transformer-distilled.safetensors",
+      "size": 20595222296,
+      "sha256": "451105f92aab7f6809a02e8cfc4959279e2ecbf64c8162c68f23012bd33add2c"
+    },
+    {
+      "path": "vae_decoder_av.safetensors",
+      "size": 834306032,
+      "sha256": "9a2c5fc6b8cd6349188d0d8295223f9ed70ea1362ed3f94e9dab10d991db9268"
+    },
+    {
+      "path": "vae_decoder_conv.safetensors",
+      "size": 814351176,
+      "sha256": "c81bc87c8739fbcafb8c33c66b8351ef5232f3a66ea347914f85619d67b206b5"
+    },
+    {
+      "path": "vae_encoder_av.safetensors",
+      "size": 637886994,
+      "sha256": "5d627fb2c2e6e958fe5bf4b36ca05ea6a54d9db469f8f2b228925c895cdbcd96"
+    },
+    {
+      "path": "vae_encoder_conv.safetensors",
+      "size": 637887026,
+      "sha256": "5e1be85f6d31ec059853077101ff673fd6c37f3057194432a8b6f1117e2795fd"
+    },
+    {
+      "path": "vocoder.safetensors",
+      "size": 258315824,
+      "sha256": "da8635f84dc97d35aad860810ca86a2fad8e5f4df8073fff23a4d5d5043ea506"
+    }
+  ]
+}

@@ -11,14 +11,14 @@ from mflux.models.common.config.model_config import ModelConfig
 
 
 def _model_class(family: str):
-    if family == "z_image":
-        from mflux.models.z_image.variants.z_image import ZImage
+    if family == "flux3":
+        from mflux.models.flux3.variants.txt2img.flux3_klein import Flux3Klein
 
-        return ZImage
-    if family == "flux2":
-        from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
+        return Flux3Klein
+    if family == "qwen21":
+        from mflux.models.qwen21.variants.txt2img.qwen_image_21 import QwenImage21
 
-        return Flux2Klein
+        return QwenImage21
     raise ValueError(f"unsupported mflux family {family!r}")
 
 
@@ -67,8 +67,6 @@ class MfluxBackend:
                 num_inference_steps=params["steps"],
                 width=params["width"],
                 height=params["height"],
-                # The mflux CLI default for every family served here.
-                scheduler="flow_match_euler_discrete",
                 **options,
             )
             images.append(encode(generated.image, params["output_format"], params.get("output_compression")))

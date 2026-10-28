@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from media_gen.catalog import MODELS, Manifest, ManifestFile, manifest
-from media_gen.pull import PullError, RateLimiter, _require_https, pull_manifest
+from media_gen.pull import PullError, RateLimiter, _require_https, hf_token, pull_manifest
 
 BIG = b"weights" * 50_000
 SMALL = b'{"hidden_size": 8}\n'
@@ -96,6 +96,23 @@ def test_hash_mismatch_fails_and_discards(tmp_path):
     assert not (root / "sub/model.safetensors").exists()
 
 
+def test_gated_model_explains_how_to_get_access(tmp_path):
+    gated = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(403)))
+    with pytest.raises(PullError, match="accept its terms at https://huggingface.co/org/repo"):
+        pull_manifest(make_manifest(), tmp_path, RateLimiter(1e12), gated, log=lambda s: None)
+
+
+def test_token_from_environment_or_saved_login(tmp_path, monkeypatch):
+    monkeypatch.setenv("HF_HOME", str(tmp_path))
+    monkeypatch.delenv("HF_TOKEN_PATH", raising=False)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    assert hf_token() is None
+    (tmp_path / "token").write_text("hf_saved\n")
+    assert hf_token() == "hf_saved"
+    monkeypatch.setenv("HF_TOKEN", "hf_env")
+    assert hf_token() == "hf_env"
+
+
 def test_refuses_plain_http():
     with pytest.raises(PullError):
         _require_https(httpx.Request("GET", "http://cdn.example/file"))
@@ -116,7 +133,7 @@ def test_shipped_manifests_are_valid():
             assert len(m.revision) == 40
             assert m.files
             assert model.download_bytes() > 1e9
-    assert manifest("z-image-turbo").repo_id == "Tongyi-MAI/Z-Image-Turbo"
+    assert manifest("qwen-image-2.1").repo_id == "Qwen/Qwen-Image-2.1"
 
 
 def test_remove_keeps_shared_repositories(tmp_path, monkeypatch, capsys):
@@ -144,3 +161,28 @@ def test_remove_keeps_shared_repositories(tmp_path, monkeypatch, capsys):
     assert not (home / "models" / "org--alone").exists()
     assert manifests["shared"].directory(home / "models").exists()
     assert cli.main(["remove", "nope"]) == 2
+
+
+def test_prune_removes_only_retired_downloads(tmp_path, monkeypatch, capsys):
+    from media_gen import catalog, cli
+    from media_gen.catalog import COMPLETE_MARKER, MediaModel
+
+    current = make_manifest()
+    monkeypatch.setattr(catalog, "manifest", {"current": replace(current, name="current")}.__getitem__)
+    one = MediaModel("one", "image", "fake", "One", "test", ("current",), 1)
+    monkeypatch.setattr(cli, "MODELS", {"one": one})
+    models = tmp_path / "home" / "models"
+    kept = current.directory(models)
+    retired = models / "org--retired" / ("c" * 40)
+    partial = models / "org--partial" / ("d" * 40)
+    foreign = models / "someone--else" / "notes"
+    for directory in (kept, retired, partial, foreign):
+        directory.mkdir(parents=True)
+    (kept / COMPLETE_MARKER).write_text("{}")
+    (retired / COMPLETE_MARKER).write_text("{}")
+    (partial / ".lock").write_text("")
+    monkeypatch.setenv("MEDIA_GEN_HOME", str(tmp_path / "home"))
+
+    assert cli.main(["prune"]) == 0
+    assert kept.exists() and foreign.exists()
+    assert not retired.exists() and not retired.parent.exists() and not partial.exists()

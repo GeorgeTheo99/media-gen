@@ -68,9 +68,21 @@ def _require_https(request: httpx.Request) -> None:
         raise PullError(f"refusing non-HTTPS download URL: {request.url.host}")
 
 
+def hf_token() -> str | None:
+    """The Hugging Face token gated models need: HF_TOKEN, else the one `hf auth login` saved."""
+    if token := os.environ.get("HF_TOKEN", "").strip():
+        return token
+    hf_home = Path(os.environ.get("HF_HOME") or Path.home() / ".cache" / "huggingface")
+    path = Path(os.environ.get("HF_TOKEN_PATH") or hf_home / "token")
+    try:
+        return path.read_text().strip() or None
+    except OSError:
+        return None
+
+
 def make_client() -> httpx.Client:
     headers = {}
-    if token := os.environ.get("HF_TOKEN"):
+    if token := hf_token():
         # httpx drops Authorization when a redirect leaves huggingface.co.
         headers["Authorization"] = f"Bearer {token}"
     return httpx.Client(
@@ -93,6 +105,11 @@ def _download(client: httpx.Client, url: str, spec: ManifestFile, target: Path, 
         if offset and response.status_code == 200:
             # The server ignored the range: start over.
             offset, h = 0, _hasher(spec)
+        elif response.status_code in (401, 403):
+            raise PullError(
+                f"{spec.path}: HTTP {response.status_code}. This model is gated: accept its terms at "
+                f"{url.split('/resolve/')[0]} while signed in, then sign in here with `hf auth login`"
+            )
         elif response.status_code not in (200, 206):
             raise PullError(f"{spec.path}: HTTP {response.status_code}")
         with part.open("ab" if offset else "wb") as out:

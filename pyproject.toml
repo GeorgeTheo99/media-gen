@@ -1,6 +1,6 @@
 [project]
 name = "media-gen"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local image and video generation service for Apple Silicon, with OpenAI-compatible endpoints"
 readme = "README.md"
 license = "Apache-2.0"
@@ -19,7 +19,8 @@ dependencies = [
 # manifests are tested against these versions.
 engines = [
     "mflux==0.24.0",
-    "mlx-video-with-audio==0.1.37",
+    "ltx-core-mlx==0.18.0",
+    "ltx-pipelines-mlx==0.18.0",
 ]
 
 [project.scripts]
@@ -31,6 +32,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/media_gen"]
+
+[tool.uv.sources]
+# ltx-2-mlx v0.18.0 is not on PyPI: pinned by commit, since a tag can move.
+ltx-core-mlx = { git = "https://github.com/dgrauet/ltx-2-mlx", subdirectory = "packages/ltx-core-mlx", rev = "b82b97e3d000e01361f8cfcb745244b15b89a521" }
+ltx-pipelines-mlx = { git = "https://github.com/dgrauet/ltx-2-mlx", subdirectory = "packages/ltx-pipelines-mlx", rev = "b82b97e3d000e01361f8cfcb745244b15b89a521" }
 
 [dependency-groups]
 dev = [

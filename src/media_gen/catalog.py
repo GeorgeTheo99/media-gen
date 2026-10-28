@@ -75,8 +75,8 @@ class MediaModel:
     # Pinned repositories, in the order the backend expects them.
     manifests: tuple[str, ...]
     # Unified memory to load the model and run its largest allowed request, with headroom over
-    # the measured MLX peak (M3 Ultra): klein 16.8 GiB and Z-Image 32.6 GiB at 2048x2048,
-    # LTX-2.3 30.4 GiB for 12 s at 768x512 and for 5 s at 1280x704.
+    # the measured MLX peak (M3 Ultra): FLUX 3 Klein 20.9 GiB at 2048x2048, Qwen-Image 2.1
+    # 66.1 GiB at 1664x1664, LTX-2.5 29.2 GiB for 15 s at 1280x704 (with its tiled decode).
     memory_gib: int
     # Backend-specific load options, passed through to the worker.
     engine: dict[str, Any] = field(default_factory=dict)
@@ -101,40 +101,43 @@ MODELS: dict[str, MediaModel] = {
     m.id: m
     for m in (
         MediaModel(
-            id="z-image-turbo",
+            id="flux3-image-klein",
             kind="image",
             backend="mflux",
-            display_name="Z-Image Turbo",
-            license="apache-2.0",
-            manifests=("z-image-turbo",),
-            memory_gib=40,
-            engine={"family": "z_image", "mflux_model": "z-image-turbo"},
-            default_steps=9,
+            display_name="FLUX 3 Image Klein",
+            license="flux-kommunity",
+            manifests=("flux3-image-klein",),
+            memory_gib=28,
+            engine={"family": "flux3", "mflux_model": "flux3-image-klein"},
+            default_steps=16,
         ),
         MediaModel(
-            id="flux2-klein-4b",
+            id="qwen-image-2.1",
             kind="image",
             backend="mflux",
-            display_name="FLUX.2 [klein] 4B",
-            license="apache-2.0",
-            manifests=("flux2-klein-4b",),
-            memory_gib=24,
-            engine={"family": "flux2", "mflux_model": "flux2-klein-4b"},
-            default_steps=4,
+            display_name="Qwen-Image 2.1",
+            license="qwen-research",
+            manifests=("qwen-image-2.1",),
+            memory_gib=74,
+            engine={"family": "qwen21", "mflux_model": "qwen-image-2.1"},
+            default_size=(1328, 1328),
+            # Its native 2K takes over 10 minutes here; 1664x1664 takes about 7.
+            max_pixels=1664 * 1664,
+            default_steps=40,
         ),
         MediaModel(
-            id="ltx-2.3-distilled",
+            id="ltx-2.5",
             kind="video",
             backend="ltx",
-            display_name="LTX-2.3 Distilled (MLX Q4, with audio)",
+            display_name="LTX-2.5 Distilled (MLX Q8, with audio)",
             license="ltx-2-community",
-            # The unified video pack, then its Gemma 3 text encoder.
-            manifests=("ltx23-mlx-av-q4", "gemma-3-12b-it-bf16"),
-            memory_gib=48,
-            default_size=(768, 512),
+            manifests=("ltx-2.5-mlx-q8",),
+            memory_gib=40,
+            default_size=(1280, 704),
             max_pixels=1280 * 768,
             size_multiple=64,
-            max_seconds=12,
+            # 5 s takes about 3 minutes here, 15 s about 13.
+            max_seconds=15,
             default_seconds=5,
         ),
     )

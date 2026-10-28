@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+import os
 import re
 from pathlib import Path
 
@@ -35,6 +36,8 @@ def main() -> None:
     response = httpx.get(
         f"https://huggingface.co/api/models/{args.repo_id}/revision/{args.revision}",
         params={"blobs": "true"},
+        # Gated repositories list their files only to an account that accepted their terms.
+        headers={"Authorization": f"Bearer {token}"} if (token := os.environ.get("HF_TOKEN")) else {},
         timeout=30,
     )
     response.raise_for_status()
