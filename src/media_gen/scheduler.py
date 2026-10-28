@@ -26,6 +26,13 @@ class JobCancelled(MediaError):
         super().__init__(409, "cancelled", "the job was cancelled")
 
 
+class ShuttingDown(MediaError):
+    """The service stopped before the job finished; a stored video resumes at the next start."""
+
+    def __init__(self) -> None:
+        super().__init__(503, "shutting_down", "the service is shutting down", retry_after=30)
+
+
 @dataclass(eq=False)
 class Job:
     id: str
@@ -67,13 +74,17 @@ class Scheduler:
         self._task = asyncio.create_task(self._loop(), name="media-gen-scheduler")
 
     async def stop(self) -> None:
+        # Captured first: cancelling the loop clears the current job.
+        pending = [*self._queue, *([self._current] if self._current else [])]
+        if self._current and self._worker:
+            self._worker.kill()  # its job is abandoned either way; do not wait for it
         if self._task:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
-        for job in [*self._queue, *([self._current] if self._current else [])]:
+        for job in pending:
             if not job.future.done():
-                job.future.set_exception(MediaError(503, "shutting_down", "the service is shutting down"))
+                job.future.set_exception(ShuttingDown())
         self._queue.clear()
         await self._release_worker()
 
@@ -109,9 +120,9 @@ class Scheduler:
         return False
 
     async def _release_worker(self) -> None:
-        worker, self._worker = self._worker, None
-        if worker:
-            await worker.stop()
+        if self._worker:
+            await self._worker.stop()
+        self._worker = None
 
     async def _worker_for(self, model: MediaModel) -> WorkerProcess:
         if self._worker and self._worker.model_id == model.id and self._worker.alive:
@@ -136,9 +147,10 @@ class Scheduler:
         job.on_start()
         started = time.monotonic()
         try:
-            result = await worker.run(job.params, job.on_progress)
+            result = await worker.run(job.id, job.params, job.on_progress)
         except WorkerDied:
             self._worker = None
+            await worker.stop()
             if job.cancelled:
                 raise JobCancelled() from None
             raise

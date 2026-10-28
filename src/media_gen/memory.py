@@ -13,6 +13,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable
+from urllib.parse import quote
 
 import httpx
 import psutil
@@ -86,7 +87,7 @@ class MemoryGuard:
             async with self._client() as client:
                 for model in await self._idle_omlx_models(client):
                     log.info("unloading idle oMLX model %s to make room", model["id"])
-                    response = await client.post(f"/v1/models/{model['id']}/unload")
+                    response = await client.post(f"/v1/models/{quote(model['id'], safe='')}/unload")
                     if response.status_code not in (200, 202):
                         log.warning("oMLX refused to unload %s: HTTP %s", model["id"], response.status_code)
                         continue

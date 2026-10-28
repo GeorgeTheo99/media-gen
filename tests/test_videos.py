@@ -75,7 +75,10 @@ def test_multipart_with_input_reference(client):
 
 def test_validation(client):
     assert create(client, seconds="11").json()["error"]["param"] == "seconds"
-    assert create(client, size="500x500").json()["error"]["param"] == "size"
+    assert create(client, size="100x100").json()["error"]["param"] == "size"
+    assert create(client, size="4096x4096").json()["error"]["param"] == "size"
+    # OpenAI's video sizes snap to the model's multiple of 64.
+    assert create(client, size="720x480").json()["size"] == "704x512"
     assert create(client, input_reference="https://example.com/a.png").status_code == 400
     assert create(client, model="fake-image").status_code == 404
 
@@ -143,3 +146,26 @@ def test_retention_removes_expired_videos(client):
     service.sweep_expired()
     assert client.get(f"/v1/videos/{video_id}").status_code == 404
     assert not service.video_dir(video_id).exists()
+
+
+def test_shutdown_keeps_waiting_videos_for_the_next_start(settings, plenty_of_memory):
+    from fastapi.testclient import TestClient
+
+    from media_gen.api import create_app
+    from tests.conftest import FAKE_MODELS
+
+    with TestClient(create_app(settings, models=FAKE_MODELS, memory=plenty_of_memory)) as first:
+        running = create(first, prompt="sleep:30").json()["id"]
+        waiting = create(first).json()["id"]
+        deadline = time.monotonic() + 15
+        while first.get(f"/v1/videos/{running}").json()["status"] != "in_progress":
+            assert time.monotonic() < deadline
+            time.sleep(0.1)
+    store = VideoStore(settings.database)
+    assert store.get(running).status == "in_progress"
+    assert store.get(waiting).status == "queued"
+    store.close()
+
+    with TestClient(create_app(settings, models=FAKE_MODELS, memory=plenty_of_memory)) as second:
+        assert second.get(f"/v1/videos/{running}").json()["error"]["code"] == "interrupted"
+        assert wait_for_video(second, waiting)["status"] == "completed"

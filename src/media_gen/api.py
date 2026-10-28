@@ -25,14 +25,17 @@ from media_gen.catalog import MODELS, MediaModel
 from media_gen.errors import MediaError, invalid
 from media_gen.memory import MemoryGuard
 from media_gen.requests import image_params, resolve_model, video_params
-from media_gen.scheduler import Job, Scheduler
+from media_gen.scheduler import Job, Scheduler, ShuttingDown
 from media_gen.settings import Settings
 from media_gen.store import VideoRecord, VideoStore
 
 log = logging.getLogger(__name__)
 
 MAX_REFERENCE_BYTES = 20 * 1024 * 1024
+# The reference image plus the form's other fields and multipart framing.
+MAX_VIDEO_FORM_BYTES = MAX_REFERENCE_BYTES + 1024 * 1024
 RETENTION_SWEEP_SECONDS = 600
+DISCONNECT_POLL_SECONDS = 1.0
 
 
 def _error_response(exc: MediaError) -> JSONResponse:
@@ -86,6 +89,8 @@ class Service:
     async def _track_video(self, job: Job) -> None:
         try:
             await job.future
+        except ShuttingDown:
+            return  # left queued or in progress: recover() resumes or fails it at the next start
         except MediaError as exc:
             if self.store.get(job.id) is not None:
                 self.store.update(
@@ -141,6 +146,10 @@ class Service:
             self.sweep_expired()
             await asyncio.sleep(RETENTION_SWEEP_SECONDS)
 
+    async def drain(self) -> None:
+        """Let the video trackers settle after the scheduler stopped, before the store closes."""
+        await asyncio.gather(*self._tasks, return_exceptions=True)
+
 
 def create_app(
     settings: Settings,
@@ -164,6 +173,7 @@ def create_app(
         finally:
             retention.cancel()
             await sched.stop()
+            await service.drain()
             service.store.close()
 
     app = FastAPI(title="media-gen", version=__version__, lifespan=lifespan)
@@ -230,12 +240,15 @@ def create_app(
         params = image_params(body, model)
         job = Job(id=f"img_{secrets.token_hex(12)}", model=model, params=params)
         svc.scheduler.submit(job)
-        try:
-            result = await job.future
-        except asyncio.CancelledError:
-            # The client went away: do not spend the GPU on an image nobody will read.
-            svc.scheduler.cancel(job.id)
-            raise
+        while True:
+            done, _ = await asyncio.wait({job.future}, timeout=DISCONNECT_POLL_SECONDS)
+            if done:
+                break
+            if await request.is_disconnected():
+                # Nobody will read the image: free the GPU for the next job.
+                svc.scheduler.cancel(job.id)
+                raise MediaError(499, "client_disconnected", "the client disconnected")
+        result = job.future.result()
         return {
             "created": int(time.time()),
             "data": [{"b64_json": base64.b64encode(image).decode()} for image in result["images"]],
@@ -247,7 +260,10 @@ def create_app(
     async def video_request(request: Request) -> tuple[dict[str, Any], bytes | None]:
         content_type = request.headers.get("content-type", "")
         if content_type.startswith("multipart/form-data"):
-            form = await request.form()
+            length = request.headers.get("content-length", "")
+            if length.isdigit() and int(length) > MAX_VIDEO_FORM_BYTES:
+                raise MediaError(413, "request_too_large", "the request body is larger than 21 MiB")
+            form = await request.form(max_files=1, max_fields=16)
             body: dict[str, Any] = {}
             reference = None
             for key, value in form.multi_items():

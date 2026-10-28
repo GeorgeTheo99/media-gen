@@ -70,7 +70,8 @@ def _int(body: dict[str, Any], name: str, default: int | None, low: int, high: i
     return value
 
 
-def _size(body: dict[str, Any], model: MediaModel) -> tuple[int, int]:
+def _size(body: dict[str, Any], model: MediaModel, *, snap: bool = False) -> tuple[int, int]:
+    """The requested size; with ``snap``, each side rounded to the model's multiple."""
     raw = body.get("size", "auto")
     if raw in (None, "auto"):
         return model.default_size
@@ -79,6 +80,8 @@ def _size(body: dict[str, Any], model: MediaModel) -> tuple[int, int]:
         raise invalid("`size` must be `auto` or WIDTHxHEIGHT, such as 1024x1024", "size")
     width, height = int(match[1]), int(match[2])
     step = model.size_multiple
+    if snap:
+        width, height = (max(step, round(side / step) * step) for side in (width, height))
     if width % step or height % step:
         raise invalid(f"{model.id} needs a width and height that are multiples of {step}", "size")
     if min(width, height) < 256 or width * height > model.max_pixels:
@@ -133,7 +136,8 @@ def image_params(body: dict[str, Any], model: MediaModel) -> dict[str, Any]:
 def video_params(body: dict[str, Any], model: MediaModel) -> dict[str, Any]:
     _reject_unknown(body, VIDEO_FIELDS)
     seconds = _int(body, "seconds", model.default_seconds, 1, model.max_seconds)
-    width, height = _size(body, model)
+    # Video models need multiples of 64; OpenAI's 1280x720 becomes 1280x704.
+    width, height = _size(body, model, snap=True)
     return {
         "prompt": _prompt(body),
         "seconds": seconds,

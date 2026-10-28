@@ -5,10 +5,11 @@ switching or unloading a model releases all of its memory, a cancelled job
 stops at once, and a crash (or the kernel's memory killer) cannot take the
 service down with it.
 
-Protocol over a Pipe, parent to child: {"type": "run", "params": {...}} and
-{"type": "stop"}. Child to parent: {"type": "ready"}, {"type": "progress",
-"value": 0-100}, {"type": "done", "result": {...}} and {"type": "error",
-"code": ..., "message": ...}.
+Protocol over a Pipe, parent to child: {"type": "run", "job": id, "params":
+{...}} and {"type": "stop"}. Child to parent: {"type": "ready"}, and for a job
+{"type": "progress", "value": 0-100}, {"type": "done", "result": {...}} or
+{"type": "error", "code": ..., "message": ...}, each carrying its "job" id so a
+reply can never be read as another job's.
 """
 
 from __future__ import annotations
@@ -66,17 +67,24 @@ def child_main(conn: Connection, spec: dict[str, Any]) -> None:
             return
         if message["type"] == "stop":
             return
+        job = message["job"]
         try:
             result = backend.run(
-                message["params"], lambda value: conn.send({"type": "progress", "value": int(value)})
+                message["params"],
+                lambda value, job=job: conn.send({"type": "progress", "job": job, "value": int(value)}),
             )
-            conn.send({"type": "done", "result": result})
+            conn.send({"type": "done", "job": job, "result": result})
         except BackendError as exc:
-            conn.send({"type": "error", "code": exc.code, "message": str(exc)})
+            conn.send({"type": "error", "job": job, "code": exc.code, "message": str(exc)})
         except Exception as exc:
             traceback.print_exc()
             conn.send(
-                {"type": "error", "code": "generation_failed", "message": f"{type(exc).__name__}: {exc}"}
+                {
+                    "type": "error",
+                    "job": job,
+                    "code": "generation_failed",
+                    "message": f"{type(exc).__name__}: {exc}",
+                }
             )
 
 
@@ -127,20 +135,33 @@ class WorkerProcess:
     async def start(self) -> None:
         self._process.start()
         self._child.close()
-        message = await self._recv()
-        if message["type"] == "error":
+        try:
+            message = await self._recv()
+        except WorkerDied:
             await self.stop()
+            raise
+        if message["type"] == "ready":
+            return
+        await self.stop()
+        if message["type"] == "error":
             raise GenerationFailed(message["code"], message["message"])
-        if message["type"] != "ready":
-            raise GenerationFailed("worker_protocol", f"unexpected message {message['type']!r}")
+        raise GenerationFailed("worker_protocol", f"unexpected message {message['type']!r}")
 
-    async def run(self, params: dict[str, Any], on_progress: Callable[[int], None]) -> dict[str, Any]:
-        self._conn.send({"type": "run", "params": params})
+    async def run(
+        self, job_id: str, params: dict[str, Any], on_progress: Callable[[int], None]
+    ) -> dict[str, Any]:
+        self._conn.send({"type": "run", "job": job_id, "params": params})
         while True:
             message = await self._recv()
+            if message.get("job") != job_id:
+                log.warning("dropping a stale %s message from the %s worker", message["type"], self.model_id)
+                continue
             kind = message["type"]
             if kind == "progress":
-                on_progress(message["value"])
+                try:
+                    on_progress(message["value"])
+                except Exception:
+                    log.exception("progress update for %s failed", job_id)
             elif kind == "done":
                 return message["result"]
             elif kind == "error":
