@@ -13,7 +13,6 @@ from media_gen.errors import MediaError, invalid
 SIZE = re.compile(r"^(\d{2,5})x(\d{2,5})$")
 MAX_PROMPT_CHARS = 8000
 MAX_SEED = 2**32 - 1
-VIDEO_FPS = 24
 OUTPUT_FORMATS = ("png", "jpeg", "webp")
 # OpenAI image options with no local equivalent, accepted and ignored.
 IGNORED_IMAGE_FIELDS = {"quality", "style", "user", "moderation"}
@@ -136,15 +135,16 @@ def image_params(body: dict[str, Any], model: MediaModel) -> dict[str, Any]:
 def video_params(body: dict[str, Any], model: MediaModel) -> dict[str, Any]:
     _reject_unknown(body, VIDEO_FIELDS)
     seconds = _int(body, "seconds", model.default_seconds, 1, model.max_seconds)
-    # Video models need multiples of 64; OpenAI's 1280x720 becomes 1280x704.
+    # Snap to the model's spatial stride (LTX: 64, Wan: 16).
     width, height = _size(body, model, snap=True)
     return {
         "prompt": _prompt(body),
         "seconds": seconds,
         "width": width,
         "height": height,
-        "fps": VIDEO_FPS,
-        # LTX works in blocks of 8 frames plus one.
-        "num_frames": round(seconds * VIDEO_FPS / 8) * 8 + 1,
+        "fps": model.video_fps,
+        # LTX: 8k+1 at 24 fps. Wan I2V: 4k+1 at 16 fps.
+        "num_frames": round(seconds * model.video_fps / model.temporal_multiple) * model.temporal_multiple
+        + 1,
         "seed": _seed(body),
     }

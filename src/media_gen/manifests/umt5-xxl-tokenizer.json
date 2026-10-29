@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "repo_id": "google/umt5-xxl",
+  "revision": "66cb9e7e85526fe440a945569e42c72fb6cbc0ad",
+  "files": [
+    {
+      "path": "config.json",
+      "size": 799,
+      "git_sha1": "63af2a0b47f4222ae965ebaba08fe5b3b5f2b8da"
+    },
+    {
+      "path": "special_tokens_map.json",
+      "size": 6623,
+      "git_sha1": "9b23a4a3e8026c3c6022e1f35ffd117a2f72dd76"
+    },
+    {
+      "path": "spiece.model",
+      "size": 4548313,
+      "sha256": "e3909a67b780650b35cf529ac782ad2b6b26e6d1f849d3fbb6a872905f452458"
+    },
+    {
+      "path": "tokenizer.json",
+      "size": 16853013,
+      "sha256": "af904105ce1071b1202bba0059a841f4a7b85b48b6ec179c4948e3483476e0dd"
+    },
+    {
+      "path": "tokenizer_config.json",
+      "size": 6841,
+      "git_sha1": "c1a696560218c243e01e37c5f9cd5c368db936df"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 [project]
 name = "media-gen"
-version = "0.2.0"
+version = "0.3.0"
 description = "Local image and video generation service for Apple Silicon, with OpenAI-compatible endpoints"
 readme = "README.md"
 license = "Apache-2.0"
@@ -21,6 +21,9 @@ engines = [
     "mflux==0.24.0",
     "ltx-core-mlx==0.18.0",
     "ltx-pipelines-mlx==0.18.0",
+    "mlx-video",
+    # The Wan engine imports mlx-vlm even for video-only use. Keep its API pinned.
+    "mlx-vlm==0.4.0",
 ]
 
 [project.scripts]
@@ -34,6 +37,8 @@ build-backend = "hatchling.build"
 packages = ["src/media_gen"]
 
 [tool.uv.sources]
+# The PyPI mlx-video name is a different project; always use this exact source.
+mlx-video = { git = "https://github.com/Blaizzy/mlx-video", rev = "87db56a51758fefb748a359b90a5283bb8ba4837" }
 # ltx-2-mlx v0.18.0 is not on PyPI: pinned by commit, since a tag can move.
 ltx-core-mlx = { git = "https://github.com/dgrauet/ltx-2-mlx", subdirectory = "packages/ltx-core-mlx", rev = "b82b97e3d000e01361f8cfcb745244b15b89a521" }
 ltx-pipelines-mlx = { git = "https://github.com/dgrauet/ltx-2-mlx", subdirectory = "packages/ltx-pipelines-mlx", rev = "b82b97e3d000e01361f8cfcb745244b15b89a521" }

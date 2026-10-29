@@ -285,6 +285,8 @@ def create_app(
         body, reference = await video_request(request)
         model = resolve_model(svc.models, body.get("model"), "video", settings.models_dir)
         params = video_params({k: v for k, v in body.items() if k != "input_reference"}, model)
+        if model.requires_reference and reference is None:
+            raise invalid("this model requires an uploaded `input_reference` image", "input_reference")
         video_id = f"video_{secrets.token_hex(12)}"
         directory = svc.video_dir(video_id)
         directory.mkdir(parents=True)

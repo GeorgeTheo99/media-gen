@@ -20,6 +20,7 @@ import importlib
 import logging
 import multiprocessing
 import os
+import signal
 import traceback
 from collections.abc import Callable
 from multiprocessing.connection import Connection
@@ -32,6 +33,7 @@ log = logging.getLogger(__name__)
 BACKENDS = {
     "mflux": "media_gen.backends.mflux_backend:MfluxBackend",
     "ltx": "media_gen.backends.ltx_backend:LtxBackend",
+    "wan": "media_gen.backends.wan_backend:WanBackend",
     "fake": "media_gen.backends.fake:FakeBackend",
 }
 
@@ -49,7 +51,10 @@ def _load_backend(spec: dict[str, Any]):
     return getattr(importlib.import_module(module_name), class_name)(spec)
 
 
-def child_main(conn: Connection, spec: dict[str, Any]) -> None:
+def child_main(conn: Connection, spec: dict[str, Any], session_ready) -> None:
+    # Record group ownership before importing an engine that could spawn subprocesses.
+    os.setsid()
+    session_ready.set()
     # Weights are pinned and already on disk: never let a library fetch more.
     os.environ["HF_HUB_OFFLINE"] = "1"
     os.environ["TRANSFORMERS_OFFLINE"] = "1"
@@ -103,8 +108,12 @@ class WorkerProcess:
         self._spec = spec
         ctx = multiprocessing.get_context("spawn")
         self._conn, child = ctx.Pipe()
+        self._session_ready = ctx.Event()
         self._process = ctx.Process(
-            target=child_main, args=(child, spec), name=f"media-gen-{model_id}", daemon=True
+            target=child_main,
+            args=(child, spec, self._session_ready),
+            name=f"media-gen-{model_id}",
+            daemon=True,
         )
         self._child = child
 
@@ -168,7 +177,14 @@ class WorkerProcess:
                 raise GenerationFailed(message["code"], message["message"])
 
     def kill(self) -> None:
-        if self._process.is_alive():
+        # The leader can die first, leaving an encoder in the group. The handshake
+        # proves this group belongs to us even when getpgid(leader) no longer works.
+        if self._session_ready.is_set():
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(self.pid, signal.SIGKILL)
+            self._session_ready.clear()
+        elif self._process.is_alive():
+            # Before the handshake no engine has run and there are no descendants.
             self._process.kill()
 
     async def stop(self) -> None:
@@ -178,6 +194,7 @@ class WorkerProcess:
             await asyncio.to_thread(self._process.join, 15)
             if self._process.is_alive():
                 log.warning("worker %s did not stop; killing it", self.model_id)
-                self._process.kill()
+                self.kill()
                 await asyncio.to_thread(self._process.join, 5)
+        self.kill()  # Reap descendants even after a graceful exit or a worker crash.
         self._conn.close()

@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "repo_id": "Anes1032/Wan2.2-I2V-A14B-mlx-q8",
+  "revision": "633f50fc3e16e7faf76713dcf07b0bea730f02c9",
+  "files": [
+    {
+      "path": "LICENSE",
+      "size": 11358,
+      "git_sha1": "d645695673349e3947e8e5ae42332d0ac3164cd7"
+    },
+    {
+      "path": "NOTICE",
+      "size": 492,
+      "git_sha1": "e64a95ecd00169933dd43ee9082a277622e06ffc"
+    },
+    {
+      "path": "config.json",
+      "size": 1698,
+      "git_sha1": "807d93c602ed29d73e27b8432d67bc7539ec01ef"
+    },
+    {
+      "path": "high_noise_model.safetensors",
+      "size": 15405787476,
+      "sha256": "2774ce4606b143ee026d10d51f73e3401cad75d75d52c7126e07bc4889eaaf17"
+    },
+    {
+      "path": "low_noise_model.safetensors",
+      "size": 15405787476,
+      "sha256": "6f39ce7655ce9d4004a43f86af4b0e610f5b0a7c6647e422857d43633beb4faa"
+    },
+    {
+      "path": "t5_encoder.safetensors",
+      "size": 11361845505,
+      "sha256": "e86ee4199903e00a88dcd43583a43a6eb898cef600e38670f222d7e37d163787"
+    },
+    {
+      "path": "vae.safetensors",
+      "size": 507591226,
+      "sha256": "977530e453dbfabbab31e2972e1577d8d7e2840ba7410c81aa3fd421c0cd7414"
+    }
+  ]
+}

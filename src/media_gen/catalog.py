@@ -69,7 +69,7 @@ def manifest(name: str) -> Manifest:
 class MediaModel:
     id: str
     kind: Literal["image", "video"]
-    backend: Literal["mflux", "ltx"]
+    backend: Literal["mflux", "ltx", "wan"]
     display_name: str
     license: str
     # Pinned repositories, in the order the backend expects them.
@@ -86,6 +86,9 @@ class MediaModel:
     default_steps: int | None = None
     max_seconds: int = 0
     default_seconds: int = 0
+    video_fps: int = 24
+    temporal_multiple: int = 8
+    requires_reference: bool = False
 
     def resolved_manifests(self) -> list[Manifest]:
         return [manifest(name) for name in self.manifests]
@@ -124,6 +127,25 @@ MODELS: dict[str, MediaModel] = {
             # Its native 2K takes over 10 minutes here; 1664x1664 takes about 7.
             max_pixels=1664 * 1664,
             default_steps=40,
+        ),
+        MediaModel(
+            id="wan2.2-i2v-a14b",
+            kind="video",
+            backend="wan",
+            display_name="Wan 2.2 I2V-A14B (MLX Q8, silent)",
+            license="apache-2.0",
+            manifests=("wan2.2-i2v-a14b-mlx-q8", "umt5-xxl-tokenizer"),
+            # Conservative admission floor; both Q8 experts plus VAE activations.
+            memory_gib=128,
+            engine={"steps": 40},
+            default_size=(832, 480),
+            max_pixels=1280 * 704,
+            size_multiple=16,
+            max_seconds=5,
+            default_seconds=5,
+            video_fps=16,
+            temporal_multiple=4,
+            requires_reference=True,
         ),
         MediaModel(
             id="ltx-2.5",

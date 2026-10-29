@@ -10,12 +10,16 @@ runs on its own too.
 | `flux3-image-klein` | image | 20 GB | 28 GiB | ~31 s at 1024² (16 steps), ~3 min at 2048² |
 | `qwen-image-2.1` | image (strong text rendering) | 33 GB | 74 GiB | ~3.5 min at 1328² (40 steps), ~7 min at 1664² |
 | `ltx-2.5` | video with synchronized audio | 45 GB | 40 GiB | ~3 min for 5 s at 1280×704, ~13 min for 15 s |
+| `wan2.2-i2v-a14b` | image-to-video, silent | 43 GB | 128 GiB admission floor | ~5 min 16 s for 1 s at 512×288 (40 steps); larger clips not benchmarked |
 
 Engines: [mflux](https://github.com/filipstrand/mflux) 0.24 for images and
 [ltx-2-mlx](https://github.com/dgrauet/ltx-2-mlx) 0.18 (the distilled two-stage
 pipeline, 8-bit pack) for LTX-2.5, both pinned. Each model is a set of Hugging
 Face repositories pinned at a commit with every file's size and hash
-(`src/media_gen/manifests/`).
+(`src/media_gen/manifests/`). Wan uses [MLX-Video](https://github.com/Blaizzy/mlx-video)
+pinned by Git commit (the PyPI name belongs to another project), with the
+[Anes1032 Q8 conversion](https://huggingface.co/Anes1032/Wan2.2-I2V-A14B-mlx-q8)
+of the official Apache-2.0 model and a separately pinned UMT5 tokenizer.
 
 FLUX 3 Image Klein and the LTX-2.5 pack are gated: accept their terms on
 Hugging Face while signed in, then sign in on the Mac (`hf auth login`, or set
@@ -40,6 +44,25 @@ curl -s localhost:9112/v1/videos -H 'content-type: application/json' \
 # poll GET /v1/videos/{id} until "completed", then GET /v1/videos/{id}/content
 ```
 
+## Wan image-to-video
+
+Wan requires a starting image, generates **silent** video at **16 fps**, and accepts
+1–5 seconds. Default size is 832×480; dimensions are multiples of 16, up to
+1280×704 pixels. A missing reference is rejected before a job is queued. LTX
+remains the option for text-to-video and synchronized audio.
+
+```bash
+curl -s localhost:9112/v1/videos \
+  -F model=wan2.2-i2v-a14b -F prompt="Gentle waves move across the lake" \
+  -F seconds=5 -F input_reference=@lake.png
+```
+
+Both `ffmpeg` and `ffprobe` are required. The adapter uses a private offline
+Hugging Face cache for its pinned tokenizer. It checks output dimensions, FPS
+and frame count, trimming the pinned engine's three extra VAE frames when needed.
+The upstream API has no per-step callback, so progress reports stages rather
+than a smooth percentage. Cancellation still terminates the worker process.
+
 ## API
 
 - `POST /v1/images/generations`: `model`, `prompt`, `n` (1-4), `size` (`auto`
@@ -48,8 +71,9 @@ curl -s localhost:9112/v1/videos -H 'content-type: application/json' \
   `b64_json` only. `quality`, `style`, `user` and `moderation` are accepted and
   ignored; anything else unknown is a 400.
 - `POST /v1/videos` (JSON, or multipart with an `input_reference` image for
-  image-to-video): `model`, `prompt`, `seconds` (1-15), `size` (snapped to
-  multiples of 64, so `1280x720` becomes `1280x704`; up to 1280×768 pixels), `seed`. Then `GET /v1/videos`, `GET /v1/videos/{id}`,
+  image-to-video): `model`, `prompt`, `seconds`, `size`, `seed`. LTX accepts 1–15 seconds,
+  sizes snapped to multiples of 64 (so `1280x720` becomes `1280x704`), up to 1280×768 pixels.
+  Wan has the reference, duration and size limits above. Then `GET /v1/videos`, `GET /v1/videos/{id}`,
   `GET /v1/videos/{id}/content` and `DELETE /v1/videos/{id}` (cancels a queued
   or running video). Videos expire after `MEDIA_GEN_VIDEO_RETENTION_HOURS` (24).
 - `GET /v1/models`, `GET /health`.
@@ -103,5 +127,6 @@ model's own license:
   (non-commercial use; commercial use of outputs for qualifying users under US$5M revenue).
 - Qwen-Image 2.1: [Qwen Research License](https://huggingface.co/Qwen/Qwen-Image-2.1) (non-commercial,
   research and evaluation).
+- Wan 2.2 I2V-A14B: Apache-2.0 (base model and Q8 conversion).
 - LTX-2.5: [LTX-2 Community License](https://huggingface.co/dgrauet/ltx-2.5-mlx-q8) (free for entities
   under US$10M revenue), including its bundled Gemma text encoder.
