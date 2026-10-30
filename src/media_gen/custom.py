@@ -97,27 +97,29 @@ class Profile:
 # Safetensors ------------------------------------------------------------------
 
 
-def read_header(path: Path) -> tuple[dict[str, dict[str, Any]], int]:
-    """A safetensors file's tensor table (without ``__metadata__``) and the byte offset its data starts at."""
+def read_header(path: Path, name: str | None = None) -> tuple[dict[str, dict[str, Any]], int]:
+    """A safetensors file's tensor table (without ``__metadata__``) and the byte offset its data starts at.
+    Errors call the file ``name`` (default: its own name)."""
+    name = name or path.name
     try:
         with path.open("rb") as f:
             prefix = f.read(8)
             if len(prefix) != 8:
-                raise CustomError(f"{path.name} is not a safetensors file")
+                raise CustomError(f"{name} is not a safetensors file")
             (length,) = struct.unpack("<Q", prefix)
             if not 2 <= length <= MAX_HEADER_BYTES:
-                raise CustomError(f"{path.name} is not a safetensors file (bad header length)")
+                raise CustomError(f"{name} is not a safetensors file (bad header length)")
             raw = f.read(length)
     except OSError as exc:
-        raise CustomError(f"cannot read {path.name}: {exc.strerror or exc}") from None
+        raise CustomError(f"cannot read {name}: {exc.strerror or exc}") from None
     if len(raw) != length:
-        raise CustomError(f"{path.name} is truncated")
+        raise CustomError(f"{name} is truncated")
     try:
         header = json.loads(raw)
     except (UnicodeDecodeError, ValueError):
-        raise CustomError(f"{path.name} is not a safetensors file (bad header)") from None
+        raise CustomError(f"{name} is not a safetensors file (bad header)") from None
     if not isinstance(header, dict):
-        raise CustomError(f"{path.name} is not a safetensors file (bad header)")
+        raise CustomError(f"{name} is not a safetensors file (bad header)")
     header.pop("__metadata__", None)
     return header, 8 + length
 
@@ -174,15 +176,17 @@ def _quantization(pack_dir: Path) -> tuple[int, int]:
     return 0, 0
 
 
-def check_adapter(adapter: Path, base: MediaModel, weights: Path) -> tuple[int, int]:
-    """Refuse an adapter the engine would not apply in full to ``base``; return its rank and layer count."""
+def check_adapter(adapter: Path, base: MediaModel, weights: Path, name: str | None = None) -> tuple[int, int]:
+    """Refuse an adapter the engine would not apply in full to ``base``; return its rank and layer count.
+    Errors call the file ``name`` (default: its own name)."""
     fmt = base.adapters
     if fmt is None:
         raise CustomError(f"{base.id} does not accept LoRA adapters")
-    header, data_start = read_header(adapter)
-    _check_layout(adapter.name, header, data_start, adapter.stat().st_size)
+    name = name or adapter.name
+    header, data_start = read_header(adapter, name)
+    _check_layout(name, header, data_start, adapter.stat().st_size)
     if not header:
-        raise CustomError(f"{adapter.name} has no tensors")
+        raise CustomError(f"{name} has no tensors")
     model, _ = read_header(weights)
     bits, group_size = _quantization(weights.parent)
 
@@ -195,27 +199,27 @@ def check_adapter(adapter: Path, base: MediaModel, weights: Path) -> tuple[int, 
         half = next((suffix for suffix in PAIR if renamed.endswith(suffix)), None)
         if half is None:
             raise CustomError(
-                f"{adapter.name}: {key!r} is not a LoRA weight. Only adapters with lora_A/lora_B pairs "
+                f"{name}: {key!r} is not a LoRA weight. Only adapters with lora_A/lora_B pairs "
                 f"(PEFT or ComfyUI naming, no alpha or other tensors) are supported"
             )
         target = renamed.removesuffix(half)
         if half in pairs.setdefault(target, {}):
-            raise CustomError(f"{adapter.name}: two tensors patch {target!r}")
+            raise CustomError(f"{name}: two tensors patch {target!r}")
         pairs[target][half] = info["shape"]
 
     ranks = set()
     for target, halves in pairs.items():
         if len(halves) != 2:
-            raise CustomError(f"{adapter.name}: {target!r} has only one half of its LoRA pair")
+            raise CustomError(f"{name}: {target!r} has only one half of its LoRA pair")
         weight = model.get(f"{fmt.prefix}{target}.weight")
         if weight is None:
             raise CustomError(
-                f"{adapter.name}: {target!r} is not a layer of {base.id}; this adapter was made for "
+                f"{name}: {target!r} is not a layer of {base.id}; this adapter was made for "
                 f"another model or uses naming the engine does not read"
             )
         shape = weight.get("shape") or []
         if len(shape) != 2:
-            raise CustomError(f"{adapter.name}: {target!r} is not a linear layer of {base.id}")
+            raise CustomError(f"{name}: {target!r} is not a linear layer of {base.id}")
         out_features, in_features = shape
         scales = model.get(f"{fmt.prefix}{target}.scales")
         if scales is not None:
@@ -226,10 +230,10 @@ def check_adapter(adapter: Path, base: MediaModel, weights: Path) -> tuple[int, 
                                   f"be checked")
         a, b = halves[PAIR[0]], halves[PAIR[1]]
         if len(a) != 2 or len(b) != 2 or a[0] != b[1] or not 1 <= a[0] <= MAX_RANK:
-            raise CustomError(f"{adapter.name}: {target!r} is not a LoRA pair of rank 1-{MAX_RANK}")
+            raise CustomError(f"{name}: {target!r} is not a LoRA pair of rank 1-{MAX_RANK}")
         if a[1] != in_features or b[0] != out_features:
             raise CustomError(
-                f"{adapter.name}: {target!r} is {b[0]}x{a[1]} but {base.id}'s layer is "
+                f"{name}: {target!r} is {b[0]}x{a[1]} but {base.id}'s layer is "
                 f"{out_features}x{in_features}; this adapter was made for another model"
             )
         ranks.add(a[0])
@@ -394,7 +398,7 @@ class ProfileStore:
             part = self.adapters / f".import-{secrets.token_hex(8)}.part"
             try:
                 digest, size = self._copy(source, part)
-                rank, layers = check_adapter(part, base, target_weights(base, models_dir))
+                rank, layers = check_adapter(part, base, target_weights(base, models_dir), filename)
                 final = self.adapters / f"{digest}.safetensors"
                 shared = any(p.adapter_sha256 == digest for p in profiles.values())
                 # Another profile's copy of the same file is reused only while it is intact.

@@ -135,7 +135,8 @@ def test_malformed_files_are_refused(store, settings, weights, tmp_path):
             add(store, settings, path)
     garbage = tmp_path / "garbage.safetensors"
     garbage.write_bytes(b"\xff" * 64)
-    with pytest.raises(CustomError, match="not a safetensors file"):
+    # Named as the owner's file, not the copy being checked.
+    with pytest.raises(CustomError, match="^garbage.safetensors is not a safetensors file"):
         add(store, settings, garbage)
 
 
