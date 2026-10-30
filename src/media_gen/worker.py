@@ -118,6 +118,10 @@ class WorkerProcess:
         self._child = child
 
     @property
+    def spec(self) -> dict[str, Any]:
+        return self._spec
+
+    @property
     def alive(self) -> bool:
         return self._process.is_alive()
 

@@ -125,15 +125,18 @@ class Scheduler:
         self._worker = None
 
     async def _worker_for(self, model: MediaModel) -> WorkerProcess:
-        if self._worker and self._worker.model_id == model.id and self._worker.alive:
-            return self._worker
+        spec = self._spec_for(model)
+        # The spec too: a custom profile imported again under its id brings another adapter.
+        worker = self._worker
+        if worker and worker.model_id == model.id and worker.spec == spec and worker.alive:
+            return worker
         await self._release_worker()
         self._state = "making_room"
         await self._memory.make_room(model.memory_gib)
         self._state = "loading"
         log.info("loading %s", model.id)
         started = time.monotonic()
-        worker = WorkerProcess(model.id, self._spec_for(model))
+        worker = WorkerProcess(model.id, spec)
         await worker.start()
         log.info("loaded %s in %.1fs", model.id, time.monotonic() - started)
         self._worker = worker

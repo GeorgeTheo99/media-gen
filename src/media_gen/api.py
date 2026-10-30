@@ -22,6 +22,7 @@ from PIL import Image, UnidentifiedImageError
 
 from media_gen import __version__
 from media_gen.catalog import MODELS, MediaModel
+from media_gen.custom import ProfileStore
 from media_gen.errors import MediaError, invalid
 from media_gen.memory import MemoryGuard
 from media_gen.requests import image_params, resolve_model, video_params
@@ -51,6 +52,7 @@ class Service:
         self.models = models
         self.scheduler = scheduler
         self.store = VideoStore(settings.database)
+        self.custom = ProfileStore(settings.home)
         self._tasks: set[asyncio.Task] = set()
 
     def _spawn(self, coro) -> None:
@@ -58,13 +60,17 @@ class Service:
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
+    def served(self) -> dict[str, MediaModel]:
+        """The curated models and the owner's enabled custom profiles (read on every call)."""
+        custom = {profile_id: model for profile_id, (_, model) in self.custom.served(self.models).items()}
+        return {**custom, **self.models}
+
     def video_dir(self, video_id: str) -> Path:
         return self.settings.outputs_dir / video_id
 
     # Video jobs -------------------------------------------------------------
 
-    def enqueue_video(self, record: VideoRecord) -> None:
-        model = self.models[record.model]
+    def enqueue_video(self, record: VideoRecord, model: MediaModel) -> None:
         directory = self.video_dir(record.id)
         directory.mkdir(parents=True, exist_ok=True)
         params = {**record.params, "output_path": str(directory / "video.mp4")}
@@ -121,9 +127,10 @@ class Service:
             )
         for record in self.store.by_status("queued"):
             try:
-                if record.model not in self.models:
+                model = self.served().get(record.model)
+                if model is None:
                     raise MediaError(404, "model_not_found", f"{record.model} is no longer served")
-                self.enqueue_video(record)
+                self.enqueue_video(record, model)
             except MediaError as exc:
                 self.store.update(
                     record.id,
@@ -213,30 +220,46 @@ def create_app(
     @app.get("/v1/models", dependencies=[Depends(authorize)])
     async def list_models(request: Request) -> dict[str, Any]:
         models_dir = settings.models_dir
-        return {
-            "object": "list",
-            "data": [
-                {
-                    "id": m.id,
-                    "object": "model",
-                    "created": 0,
-                    "owned_by": "media-gen",
-                    "kind": m.kind,
-                    "display_name": m.display_name,
-                    "license": m.license,
-                    "installed": m.is_installed(models_dir),
-                    "memory_gib": m.memory_gib,
-                    "download_bytes": m.download_bytes(),
-                }
-                for m in service(request).models.values()
-            ],
-        }
+        svc = service(request)
+        rows = [
+            {
+                "id": m.id,
+                "object": "model",
+                "created": 0,
+                "owned_by": "media-gen",
+                "kind": m.kind,
+                "display_name": m.display_name,
+                "license": m.license,
+                "installed": m.is_installed(models_dir),
+                "memory_gib": m.memory_gib,
+                "download_bytes": m.download_bytes(),
+            }
+            for m in svc.models.values()
+        ]
+        # The owner's enabled profiles, told apart by `custom` and the curated model they build on.
+        for profile, model in svc.custom.served(svc.models).values():
+            rows.append({
+                "id": model.id,
+                "object": "model",
+                "created": 0,
+                "owned_by": "media-gen",
+                "kind": model.kind,
+                "display_name": model.display_name,
+                "license": model.license,
+                "installed": model.is_installed(models_dir),
+                "memory_gib": model.memory_gib,
+                "download_bytes": 0,
+                "custom": True,
+                "base_model": profile.base,
+                "source": profile.source,
+            })
+        return {"object": "list", "data": rows}
 
     @app.post("/v1/images/generations", dependencies=[Depends(authorize)])
     async def generate_images(request: Request) -> dict[str, Any]:
         body = await json_body(request)
         svc = service(request)
-        model = resolve_model(svc.models, body.get("model"), "image", settings.models_dir)
+        model = resolve_model(svc.served(), body.get("model"), "image", settings.models_dir)
         params = image_params(body, model)
         job = Job(id=f"img_{secrets.token_hex(12)}", model=model, params=params)
         svc.scheduler.submit(job)
@@ -283,7 +306,7 @@ def create_app(
     async def create_video(request: Request) -> dict[str, Any]:
         svc = service(request)
         body, reference = await video_request(request)
-        model = resolve_model(svc.models, body.get("model"), "video", settings.models_dir)
+        model = resolve_model(svc.served(), body.get("model"), "video", settings.models_dir)
         params = video_params({k: v for k, v in body.items() if k != "input_reference"}, model)
         if model.requires_reference and reference is None:
             raise invalid("this model requires an uploaded `input_reference` image", "input_reference")
@@ -312,7 +335,7 @@ def create_app(
             )
             svc.store.insert(record)
             try:
-                svc.enqueue_video(record)
+                svc.enqueue_video(record, model)
             except MediaError:
                 svc.store.delete(video_id)
                 raise

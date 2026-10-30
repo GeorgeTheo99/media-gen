@@ -66,6 +66,40 @@ def manifest(name: str) -> Manifest:
 
 
 @dataclass(frozen=True)
+class AdapterFormat:
+    """The LoRA adapters a model accepts (src/media_gen/custom.py): pairs that patch one of its files."""
+
+    # The base pack's file the adapters patch, and the key prefix the engine strips as it loads it.
+    weights: str
+    prefix: str
+    # The engine's LoRA key renaming, applied in order to every key containing the first string.
+    renames: tuple[tuple[str, str], ...]
+    # Unified memory beyond the base model's floor (and the adapter's own size) for fusing it in.
+    fusion_gib: int
+
+
+# ltx-2-mlx 0.18 (ltx_core_mlx.loader.sd_ops.LTXV_LORA_COMFY_RENAMING_MAP): ComfyUI/diffusers names
+# to its own. Its fused path patches every matching weight; unmatched keys are silently skipped.
+LTX_LORA = AdapterFormat(
+    weights="transformer-distilled.safetensors",
+    prefix="transformer.",
+    renames=(
+        ("diffusion_model.", ""),
+        (".to_out.0.", ".to_out."),
+        (".ff.net.0.proj.", ".ff.proj_in."),
+        (".ff.net.2.", ".ff.proj_out."),
+        (".linear_1.", ".linear1."),
+        (".linear_2.", ".linear2."),
+        ("audio_ff.net.0.proj.", "audio_ff.proj_in."),
+        ("audio_ff.net.2.", "audio_ff.proj_out."),
+    ),
+    # Measured (M3 Ultra): a rank-8 adapter on all 1660 linear layers raised the MLX peak of a 1 s
+    # clip from 20.9 to 21.8 GiB; fusion re-quantizes one layer at a time.
+    fusion_gib=4,
+)
+
+
+@dataclass(frozen=True)
 class MediaModel:
     id: str
     kind: Literal["image", "video"]
@@ -89,6 +123,8 @@ class MediaModel:
     video_fps: int = 24
     temporal_multiple: int = 8
     requires_reference: bool = False
+    # Set when owners may add their own LoRA profiles on top of it.
+    adapters: AdapterFormat | None = None
 
     def resolved_manifests(self) -> list[Manifest]:
         return [manifest(name) for name in self.manifests]
@@ -161,6 +197,7 @@ MODELS: dict[str, MediaModel] = {
             # 5 s takes about 3 minutes here, 15 s about 13.
             max_seconds=15,
             default_seconds=5,
+            adapters=LTX_LORA,
         ),
     )
 }

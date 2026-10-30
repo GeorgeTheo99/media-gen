@@ -12,6 +12,7 @@ import ltx_pipelines_mlx.utils.samplers as samplers
 import mlx.core as mx
 from ltx_pipelines_mlx.distilled import DistilledPipeline
 
+from media_gen.custom import CustomError, verify_adapter
 from media_gen.worker import BackendError
 
 # Share of the progress bar for each denoising stage: half resolution, then the full-size refine.
@@ -31,6 +32,8 @@ class LtxBackend:
         missing = [name for name in needed if not (Path(self.model_path) / name).is_file()]
         if missing:
             raise ValueError(f"{self.model_path} is an incomplete LTX MLX pack: missing {', '.join(missing)}")
+        # A custom profile's adapter (src/media_gen/custom.py), checked against the base model when imported.
+        self.loras = spec.get("engine", {}).get("loras", [])
 
     def run(self, params: dict[str, Any], progress: Callable[[float], None]) -> dict[str, Any]:
         output = Path(params["output_path"])
@@ -55,6 +58,15 @@ class LtxBackend:
         pipe = DistilledPipeline(model_dir=self.model_path, low_memory=True)
         pipe.verbose = False
         pipe.generate_audio = has_audio
+        if self.loras:
+            try:
+                for lora in self.loras:
+                    verify_adapter(lora)
+            except CustomError as exc:
+                raise BackendError("adapter_changed", str(exc)) from None
+            # What the library's own `--lora` sets: fused into the weights as the transformer loads.
+            # The path exists, so it is never resolved as a Hugging Face repository.
+            pipe._pending_loras = [(lora["path"], float(lora["strength"])) for lora in self.loras]
         samplers.tqdm = tracked
         mx.reset_peak_memory()
         try:
