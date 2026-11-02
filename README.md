@@ -73,6 +73,7 @@ supply the file.
 uv run media-gen custom import style.safetensors --base ltx-2.5 --name style \
   --license "CC-BY-4.0" --source "https://example.com/style-lora"   # copied and checked, disabled
 uv run media-gen custom enable custom-style    # served as custom-style; ltx-2.5 is unchanged
+uv run media-gen custom describe custom-style "Watercolor scenes; add the word wtrclr"   # empty clears
 uv run media-gen custom list [--json]
 uv run media-gen custom disable custom-style
 uv run media-gen custom remove custom-style   # forget it and delete its copy
@@ -90,7 +91,9 @@ else (alpha tensors, kohya `lora_up`/`lora_down`, adapters for another model,
 pickles, full checkpoints) is refused rather than loaded as a no-op. The file is
 copied to `$MEDIA_GEN_HOME/custom/adapters/<sha256>.safetensors` (read-only) and
 recorded in `custom/profiles.json` with its base, license, source and strength
-(above 0, up to 2). An enabled profile is listed in `GET /v1/models` with
+(above 0, up to 2), and an optional description (up to 500 characters, from
+`import --description` or `describe`): what it is for and how to prompt it, for
+clients that choose a model on the owner's behalf. An enabled profile is listed in `GET /v1/models` with
 `"custom": true` and `base_model`, and generates like its base model with the
 adapter fused in at load; the worker checks the file's SHA-256 first. Its memory
 floor is the base model's plus the adapter's size and 4 GiB (LTX-2.5) or 2 GiB

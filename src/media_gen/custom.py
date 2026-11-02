@@ -42,6 +42,7 @@ MAX_HEADER_BYTES = 100 << 20
 MAX_RANK = 1024
 MAX_STRENGTH = 2.0
 MAX_DISPLAY_NAME = 80
+MAX_DESCRIPTION = 500
 MAX_TEXT = 300
 GIB = 1 << 30
 CHUNK = 8 << 20
@@ -69,10 +70,13 @@ class Profile:
     layers: int
     enabled: bool
     imported_at: int
+    # What it is for and how to prompt it (trigger words), for clients choosing a model; may be empty.
+    description: str = ""
 
     def check(self) -> None:
         """Every field has its type and range: a hand-edited store must not serve something unchecked."""
-        texts = (self.id, self.base, self.display_name, self.license, self.source, self.filename)
+        texts = (self.id, self.base, self.display_name, self.license, self.source, self.filename,
+                 self.description)
         counts = (self.adapter_bytes, self.rank, self.layers, self.imported_at)
         if not (
             all(isinstance(value, str) for value in texts)
@@ -82,6 +86,7 @@ class Profile:
             and 0 < self.strength <= MAX_STRENGTH
             and self.id.startswith(PREFIX) and NAME.match(self.id.removeprefix(PREFIX))
             and SHA256.match(self.adapter_sha256)
+            and len(self.description) <= MAX_DESCRIPTION
         ):
             raise ValueError(f"profile {self.id!r} has a field of the wrong type or out of range")
 
@@ -331,6 +336,11 @@ def _intact(path: Path, sha256: str, size: int) -> bool:
     return True
 
 
+def _description(value: str) -> str:
+    """A profile's description; empty clears it."""
+    return _text(value, "the description", MAX_DESCRIPTION) if value.strip() else ""
+
+
 def _text(value: str, what: str, limit: int = MAX_TEXT) -> str:
     value = " ".join(value.split())
     if not value or len(value) > limit or not value.isprintable():
@@ -415,6 +425,7 @@ class ProfileStore:
         provenance: str,
         display_name: str | None = None,
         strength: float = 1.0,
+        description: str = "",
     ) -> Profile:
         """Copy, check and record an adapter as a new, disabled profile."""
         if not NAME.match(name):
@@ -432,6 +443,7 @@ class ProfileStore:
         display = _text(display_name or f"{name} (custom {base.display_name.split(' (')[0]})",
                         "the display name", MAX_DISPLAY_NAME)
         license_text, provenance_text = _text(license, "the license"), _text(provenance, "the source")
+        description_text = _description(description)
         with self._locked() as profiles:
             if profile_id in profiles:
                 raise CustomError(f"{profile_id} already exists; remove it first")
@@ -449,7 +461,7 @@ class ProfileStore:
                     id=profile_id, base=base.id, display_name=display, license=license_text,
                     source=provenance_text, strength=float(strength), adapter_sha256=digest,
                     adapter_bytes=size, filename=filename, rank=rank, layers=layers, enabled=False,
-                    imported_at=int(time.time()),
+                    imported_at=int(time.time()), description=description_text,
                 )
                 try:
                     self._save({**profiles, profile_id: profile})
@@ -490,6 +502,16 @@ class ProfileStore:
             if profile_id not in profiles:
                 raise CustomError(f"no custom profile {profile_id!r}")
             profile = replace(profiles[profile_id], enabled=enabled)
+            self._save({**profiles, profile_id: profile})
+        return profile
+
+    def describe(self, profile_id: str, description: str) -> Profile:
+        """Set (or, with empty text, clear) what a profile is for."""
+        text = _description(description)
+        with self._locked() as profiles:
+            if profile_id not in profiles:
+                raise CustomError(f"no custom profile {profile_id!r}")
+            profile = replace(profiles[profile_id], description=text)
             self._save({**profiles, profile_id: profile})
         return profile
 

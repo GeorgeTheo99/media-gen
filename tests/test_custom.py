@@ -157,6 +157,25 @@ def test_import_arguments_are_checked(store, settings, weights, tmp_path):
         add(store, settings, source)
 
 
+def test_descriptions_are_kept_checked_and_optional(store, settings, weights, tmp_path):
+    source = lora(tmp_path / "a.safetensors")
+    profile = add(store, settings, source, description="  Watercolor   scenes ")
+    assert profile.description == "Watercolor scenes"
+    ink = "Ink drawings; add the word nkdrw"
+    assert store.describe(profile.id, ink).description == ink
+    assert store.load()[profile.id].description == ink
+    assert store.describe(profile.id, " ").description == ""
+    with pytest.raises(CustomError, match="the description"):
+        store.describe(profile.id, "x" * 501)
+    with pytest.raises(CustomError, match="no custom profile"):
+        store.describe("custom-missing", "x")
+    # A store written before descriptions existed still loads.
+    data = json.loads(store.path.read_text())
+    del data["profiles"][0]["description"]
+    store.path.write_text(json.dumps(data))
+    assert store.load()[profile.id].description == ""
+
+
 def test_check_adapter_reads_the_engine_names(weights, tmp_path):
     # PEFT naming without the ComfyUI prefix, as the engine also reads it.
     path = write_safetensors(tmp_path / "peft.safetensors", {
@@ -387,7 +406,13 @@ def test_cli(settings, weights, tmp_path, monkeypatch, capsys):
     assert cli_main(["custom", "list", "--json"]) == 0
     (row,) = json.loads(capsys.readouterr().out)
     assert (row["id"], row["enabled"], row["installed"], row["kind"]) == ("custom-style", True, True, "video")
-    assert row["license"] == "CC-BY-4.0"
+    assert (row["license"], row["description"]) == ("CC-BY-4.0", "")
+    assert cli_main(["custom", "describe", "custom-style", "Watercolor scenes; add the word wtrclr"]) == 0
+    capsys.readouterr()
+    assert cli_main(["custom", "list"]) == 0
+    assert "Watercolor scenes; add the word wtrclr" in capsys.readouterr().out
+    assert cli_main(["custom", "describe", "custom-style", ""]) == 0
+    assert "description cleared" in capsys.readouterr().out
     assert cli_main(["custom", "remove", "custom-style"]) == 0
     assert cli_main(["custom", "disable", "custom-style"]) == 1
     assert cli_main(["custom", "import", str(source), "--base", "fake-image", "--name", "x",
