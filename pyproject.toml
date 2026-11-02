@@ -1,6 +1,6 @@
 [project]
 name = "media-gen"
-version = "0.6.0"
+version = "0.7.0"
 description = "Local image and video generation service for Apple Silicon, with OpenAI-compatible endpoints"
 readme = "README.md"
 license = "Apache-2.0"

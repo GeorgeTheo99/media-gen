@@ -57,6 +57,10 @@ class Settings:
         return self.home / "outputs"
 
     @property
+    def edits_dir(self) -> Path:
+        return self.home / "edits"
+
+    @property
     def database(self) -> Path:
         return self.home / "jobs.sqlite3"
 

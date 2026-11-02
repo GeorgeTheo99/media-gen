@@ -18,7 +18,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from media_gen import __version__
 from media_gen.catalog import MODELS, MediaModel
@@ -35,6 +35,12 @@ log = logging.getLogger(__name__)
 MAX_REFERENCE_BYTES = 20 * 1024 * 1024
 # The reference image plus the form's other fields and multipart framing.
 MAX_VIDEO_FORM_BYTES = MAX_REFERENCE_BYTES + 1024 * 1024
+# The most reference images an edit takes (the catalog's largest `max_references`), and its form's size.
+MAX_EDIT_IMAGES = 3
+MAX_EDIT_FORM_BYTES = MAX_EDIT_IMAGES * MAX_REFERENCE_BYTES + 1024 * 1024
+# Each reference is scaled to at most this many pixels, FLUX 3 Klein's own cap for several references,
+# so an edit's extra tokens (and memory) stay near a text-to-image's.
+MAX_REFERENCE_PIXELS = 1024 * 1024
 RETENTION_SWEEP_SECONDS = 600
 DISCONNECT_POLL_SECONDS = 1.0
 
@@ -42,6 +48,22 @@ DISCONNECT_POLL_SECONDS = 1.0
 def _error_response(exc: MediaError) -> JSONResponse:
     headers = {"Retry-After": str(exc.retry_after)} if exc.retry_after else None
     return JSONResponse(exc.body(), status_code=exc.status, headers=headers)
+
+
+def _edit_reference(data: bytes) -> Image.Image:
+    """An uploaded reference, upright, in RGB and scaled to at most MAX_REFERENCE_PIXELS."""
+    if len(data) > MAX_REFERENCE_BYTES:
+        raise invalid("each `image` must be at most 20 MiB", "image")
+    try:
+        with Image.open(io.BytesIO(data)) as opened:
+            image = ImageOps.exif_transpose(opened).convert("RGB")
+    except (UnidentifiedImageError, Image.DecompressionBombError, OSError):
+        raise invalid("each `image` must be a readable image", "image") from None
+    scale = (MAX_REFERENCE_PIXELS / (image.width * image.height)) ** 0.5
+    if scale < 1:
+        size = (max(1, int(image.width * scale)), max(1, int(image.height * scale)))
+        image = image.resize(size, Image.Resampling.LANCZOS)
+    return image
 
 
 class Service:
@@ -169,6 +191,8 @@ def create_app(
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.outputs_dir.mkdir(parents=True, exist_ok=True)
+        # An edit's references live only while it runs; a crash may have left some.
+        shutil.rmtree(settings.edits_dir, ignore_errors=True)
         sched = scheduler or Scheduler(settings, memory or MemoryGuard(settings))
         service = Service(settings, models, sched)
         app.state.service = service
@@ -255,13 +279,11 @@ def create_app(
             })
         return {"object": "list", "data": rows}
 
-    @app.post("/v1/images/generations", dependencies=[Depends(authorize)])
-    async def generate_images(request: Request) -> dict[str, Any]:
-        body = await json_body(request)
+    async def image_response(
+        request: Request, model: MediaModel, params: dict[str, Any], job_id: str
+    ) -> dict[str, Any]:
         svc = service(request)
-        model = resolve_model(svc.served(), body.get("model"), "image", settings.models_dir)
-        params = image_params(body, model)
-        job = Job(id=f"img_{secrets.token_hex(12)}", model=model, params=params)
+        job = Job(id=job_id, model=model, params=params)
         svc.scheduler.submit(job)
         while True:
             done, _ = await asyncio.wait({job.future}, timeout=DISCONNECT_POLL_SECONDS)
@@ -279,6 +301,73 @@ def create_app(
             "size": f"{params['width']}x{params['height']}",
             "seed": result["seed"],
         }
+
+    @app.post("/v1/images/generations", dependencies=[Depends(authorize)])
+    async def generate_images(request: Request) -> dict[str, Any]:
+        body = await json_body(request)
+        model = resolve_model(service(request).served(), body.get("model"), "image", settings.models_dir)
+        return await image_response(request, model, image_params(body, model), f"img_{secrets.token_hex(12)}")
+
+    async def edit_request(request: Request) -> tuple[dict[str, Any], list[bytes]]:
+        """The edit's fields and its uploaded reference images."""
+        if not request.headers.get("content-type", "").startswith("multipart/form-data"):
+            raise invalid("send the `image` files as a multipart upload", "image")
+        length = request.headers.get("content-length", "")
+        if length.isdigit() and int(length) > MAX_EDIT_FORM_BYTES:
+            raise MediaError(413, "request_too_large", "the request body is larger than 61 MiB")
+        form = await request.form(max_files=MAX_EDIT_IMAGES, max_fields=24)
+        body: dict[str, Any] = {}
+        images: list[bytes] = []
+        for key, value in form.multi_items():
+            if key in ("image", "image[]"):
+                if isinstance(value, str):
+                    raise invalid("`image` must be an uploaded image file", "image")
+                images.append(await value.read(MAX_REFERENCE_BYTES + 1))
+            elif not isinstance(value, str):
+                raise invalid(f"unexpected file field {key!r}", key)
+            else:
+                body[key] = value
+        return body, images
+
+    @app.post("/v1/images/edits", dependencies=[Depends(authorize)])
+    async def edit_images(request: Request) -> dict[str, Any]:
+        """An image made from a prompt and 1 to `max_references` reference images: an edit of one, or a
+        composition of several."""
+        body, images = await edit_request(request)
+        model = resolve_model(service(request).served(), body.get("model"), "image", settings.models_dir)
+        if not model.max_references:
+            raise invalid(f"{model.id} does not take reference images", "model")
+        if not images:
+            raise invalid("`image` is required", "image", code="missing_required_parameter")
+        if len(images) > model.max_references:
+            raise invalid(f"{model.id} takes at most {model.max_references} reference images", "image")
+        references = [await asyncio.to_thread(_edit_reference, data) for data in images]
+        if body.get("size", "auto") == "auto":
+            # The first reference's shape, in the model's size steps.
+            first, step = references[0], model.size_multiple
+            body["size"] = f"{first.width // step * step}x{first.height // step * step}"
+        if isinstance(body.get("guidance"), str):
+            with contextlib.suppress(ValueError):
+                body["guidance"] = float(body["guidance"])
+        params = image_params(body, model)
+        # Every reference adds its pixels' tokens to the output's, and memory grows with them.
+        pixels = params["width"] * params["height"] + sum(image.width * image.height for image in references)
+        if pixels > model.max_pixels:
+            raise invalid(
+                f"{model.id} needs the output and references together within {model.max_pixels:,} pixels; "
+                "choose a smaller size or fewer references",
+                "size",
+            )
+        job_id = f"img_{secrets.token_hex(12)}"
+        directory = settings.edits_dir / job_id
+        directory.mkdir(parents=True)
+        try:
+            paths = [str(directory / f"reference-{index}.png") for index in range(len(references))]
+            for image, path in zip(references, paths, strict=True):
+                await asyncio.to_thread(image.save, path)
+            return await image_response(request, model, {**params, "image_paths": paths}, job_id)
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
 
     async def video_request(request: Request) -> tuple[dict[str, Any], bytes | None]:
         content_type = request.headers.get("content-type", "")

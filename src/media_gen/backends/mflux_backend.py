@@ -1,9 +1,10 @@
-"""Text-to-image through mflux (MLX)."""
+"""Text-to-image, and edits from reference images, through mflux (MLX)."""
 
 from __future__ import annotations
 
 import io
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 import mlx.core as mx
@@ -13,14 +14,18 @@ from media_gen.custom import verify_adapter
 
 
 def _model_class(family: str):
+    """The class to load, and its text-to-image ``generate_image``."""
     if family == "flux3":
+        from mflux.models.flux3.variants.edit.flux3_klein_edit import Flux3KleinEdit
         from mflux.models.flux3.variants.txt2img.flux3_klein import Flux3Klein
 
-        return Flux3Klein
+        # Both variants are _Flux3KleinCore with the same weights, so one loaded model serves text-to-image
+        # (Flux3Klein's generate_image) and edits from reference images (its own).
+        return Flux3KleinEdit, Flux3Klein.generate_image
     if family == "qwen21":
         from mflux.models.qwen21.variants.txt2img.qwen_image_21 import QwenImage21
 
-        return QwenImage21
+        return QwenImage21, QwenImage21.generate_image
     raise ValueError(f"unsupported mflux family {family!r}")
 
 
@@ -47,7 +52,7 @@ def encode(image, output_format: str, compression: int | None) -> bytes:
 class MfluxBackend:
     def __init__(self, spec: dict[str, Any]):
         engine = spec["engine"]
-        cls = _model_class(engine["family"])
+        cls, self._text_to_image = _model_class(engine["family"])
         # A custom profile's adapter (src/media_gen/custom.py), checked against the base model when
         # imported, and applied as the model loads.
         loras = engine.get("loras", [])
@@ -66,12 +71,19 @@ class MfluxBackend:
 
     def run(self, params: dict[str, Any], progress: Callable[[float], None]) -> dict[str, Any]:
         n = params["n"]
+        # The API sends references only to a model whose catalog entry takes them (FLUX 3 Klein).
+        references = params.get("image_paths")
+        generate = (
+            partial(self.model.generate_image, image_paths=references)
+            if references
+            else partial(self._text_to_image, self.model)
+        )
         images = []
         mx.reset_peak_memory()
         for index in range(n):
             self.progress.report = lambda step, total, i=index: progress(100 * (i + step / total) / n)
             options = {} if params.get("guidance") is None else {"guidance": params["guidance"]}
-            generated = self.model.generate_image(
+            generated = generate(
                 seed=params["seed"] + index,
                 prompt=params["prompt"],
                 num_inference_steps=params["steps"],

@@ -35,11 +35,13 @@ class FakeBackend:
         if "output_path" in params:
             Path(params["output_path"]).write_bytes(b"\x00\x00\x00\x18ftypmp42fake-video")
             return {"has_audio": False, "worker_pid": self.pid}
+        # An edit's green channel counts its references, each read as the real backend would.
+        references = [Image.open(path).size for path in params.get("image_paths", [])]
         images = []
         for i in range(params["n"]):
             buffer = io.BytesIO()
             colour = ((params["seed"] + i) * 37) % 256
-            image = Image.new("RGB", (params["width"], params["height"]), (colour, 0, 0))
+            image = Image.new("RGB", (params["width"], params["height"]), (colour, len(references), 0))
             image.save(buffer, format=params["output_format"].upper().replace("JPG", "JPEG"))
             images.append(buffer.getvalue())
         return {"images": images, "seed": params["seed"], "worker_pid": self.pid}

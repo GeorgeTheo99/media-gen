@@ -44,6 +44,24 @@ curl -s localhost:9112/v1/videos -H 'content-type: application/json' \
 # poll GET /v1/videos/{id} until "completed", then GET /v1/videos/{id}/content
 ```
 
+## Edits from reference images
+
+FLUX 3 Image Klein also makes an image from a prompt and one to three reference
+images, with the same weights (`POST /v1/images/edits`, OpenAI-shaped multipart):
+an edit of one image ("make it snow; keep the bicycle"), or a composition of
+several ("the dog from the first image on the beach from the second"). Each
+reference is scaled to at most 1 MP, and the output and references together
+stay within the model's 2048×2048 pixels, since every reference adds its tokens
+(and memory) to the output's. `size` defaults to the first reference's shape.
+Measured at 1344×768: one reference about 80 s and 21 GiB peak, three about
+3 minutes. Other image models refuse references.
+
+```bash
+curl -s localhost:9112/v1/images/edits -F model=flux3-image-klein \
+  -F prompt="Make it a snowy evening; keep the same red bicycle" -F size=1344x768 \
+  -F "image[]=@bicycle.png"
+```
+
 ## Wan image-to-video
 
 Wan requires a starting image, generates **silent** video at **16 fps**, and accepts
@@ -110,6 +128,9 @@ that base model. The adapter's license and the base model's both apply.
   `output_compression`, plus `seed`, `steps` and `guidance`. Returns
   `b64_json` only. `quality`, `style`, `user` and `moderation` are accepted and
   ignored; anything else unknown is a 400.
+- `POST /v1/images/edits` (multipart): the same fields, as form values, plus 1 to
+  the model's limit of `image` (or `image[]`) files, each up to 20 MiB. FLUX 3
+  Image Klein only, up to three. Returns what generations returns.
 - `POST /v1/videos` (JSON, or multipart with an `input_reference` image for
   image-to-video): `model`, `prompt`, `seconds`, `size`, `seed`. LTX accepts 1–15 seconds,
   sizes snapped to multiples of 64 (so `1280x720` becomes `1280x704`), up to 1280×768 pixels.

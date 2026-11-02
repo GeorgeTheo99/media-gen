@@ -145,6 +145,9 @@ class MediaModel:
     video_fps: int = 24
     temporal_multiple: int = 8
     requires_reference: bool = False
+    # Reference images an image model can edit from or compose (`POST /v1/images/edits`); 0 for none.
+    # An edit's output and references together stay within max_pixels.
+    max_references: int = 0
     # Set when owners may add their own LoRA profiles on top of it.
     adapters: AdapterFormat | None = None
 
@@ -171,6 +174,9 @@ MODELS: dict[str, MediaModel] = {
             memory_gib=28,
             engine={"family": "flux3", "mflux_model": "flux3-image-klein"},
             default_steps=16,
+            # Measured at 1344x768: one reference 80 s and 21.1 GiB peak, four 247 s and 27.2 GiB (too
+            # close to the floor). Three, with the edit's pixel budget, stay under it.
+            max_references=3,
         ),
         MediaModel(
             id="qwen-image-2.1",
