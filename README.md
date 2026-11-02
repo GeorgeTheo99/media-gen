@@ -66,7 +66,7 @@ than a smooth percentage. Cancellation still terminates the worker process.
 ## Custom LoRA profiles
 
 An owner can serve their own LoRA adapter on top of a curated model that accepts
-adapters (today `ltx-2.5`), on this machine only. Nothing is downloaded: you
+adapters (`ltx-2.5` and `qwen-image-2.1`), on this machine only. Nothing is downloaded: you
 supply the file.
 
 ```bash
@@ -79,10 +79,13 @@ uv run media-gen custom remove custom-style   # forget it and delete its copy
 ```
 
 `import` accepts one `.safetensors` file whose every tensor is half of a
-`lora_A`/`lora_B` pair (ComfyUI `diffusion_model.*` naming, or bare
-`transformer_blocks.*` keys, as ltx-2-mlx renames them) with
-shapes matching a layer of the base model, in F16, BF16 or F32 tensors that tile
-the file exactly. The engine silently skips keys it does not know, so anything
+`lora_A`/`lora_B` pair with shapes matching a layer of the base model, in F16,
+BF16 or F32 tensors that tile the file exactly. For LTX-2.5 that is ComfyUI
+`diffusion_model.*` naming, or bare `transformer_blocks.*` keys, as ltx-2-mlx
+renames them. For Qwen-Image 2.1 it is `diffusion_model.*` or diffusers
+`transformer.*` naming on the layers mflux maps (attention, image MLP, including
+ai-toolkit's fused `img_mlp.gate_up`, modulation and timestep embedder), checked
+against the sharded transformer. The engines skip keys they do not know, so anything
 else (alpha tensors, kohya `lora_up`/`lora_down`, adapters for another model,
 pickles, full checkpoints) is refused rather than loaded as a no-op. The file is
 copied to `$MEDIA_GEN_HOME/custom/adapters/<sha256>.safetensors` (read-only) and
@@ -90,7 +93,8 @@ recorded in `custom/profiles.json` with its base, license, source and strength
 (above 0, up to 2). An enabled profile is listed in `GET /v1/models` with
 `"custom": true` and `base_model`, and generates like its base model with the
 adapter fused in at load; the worker checks the file's SHA-256 first. Its memory
-floor is the base model's plus 4 GiB and the adapter's size. A broken
+floor is the base model's plus the adapter's size and 4 GiB (LTX-2.5) or 2 GiB
+(Qwen-Image 2.1). A broken
 `profiles.json` disables custom profiles, never the curated models.
 
 Shape checks prove the engine applies the adapter, not that it was trained for

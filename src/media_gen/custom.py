@@ -176,6 +176,20 @@ def _quantization(pack_dir: Path) -> tuple[int, int]:
     return 0, 0
 
 
+def _model_tensors(weights: Path) -> dict[str, dict[str, Any]]:
+    """The base model's tensor table, from one safetensors file or a sharded checkpoint's index."""
+    if not weights.name.endswith(".index.json"):
+        return read_header(weights)[0]
+    try:
+        shards = set(json.loads(weights.read_text())["weight_map"].values())
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        raise CustomError(f"{weights} is not a readable checkpoint index") from None
+    tensors: dict[str, dict[str, Any]] = {}
+    for shard in sorted(shards):
+        tensors.update(read_header(weights.parent / shard)[0])
+    return tensors
+
+
 def check_adapter(adapter: Path, base: MediaModel, weights: Path, name: str | None = None) -> tuple[int, int]:
     """Refuse an adapter the engine would not apply in full to ``base``; return its rank and layer count.
     Errors call the file ``name`` (default: its own name)."""
@@ -187,30 +201,11 @@ def check_adapter(adapter: Path, base: MediaModel, weights: Path, name: str | No
     _check_layout(name, header, data_start, adapter.stat().st_size)
     if not header:
         raise CustomError(f"{name} has no tensors")
-    model, _ = read_header(weights)
+    model = _model_tensors(weights)
     bits, group_size = _quantization(weights.parent)
 
-    pairs: dict[str, dict[str, list[int]]] = {}
-    for key, info in header.items():
-        renamed = key
-        for old, new in fmt.renames:
-            if old in renamed:
-                renamed = renamed.replace(old, new)
-        half = next((suffix for suffix in PAIR if renamed.endswith(suffix)), None)
-        if half is None:
-            raise CustomError(
-                f"{name}: {key!r} is not a LoRA weight. Only adapters with lora_A/lora_B pairs "
-                f"(PEFT or ComfyUI naming, no alpha or other tensors) are supported"
-            )
-        target = renamed.removesuffix(half)
-        if half in pairs.setdefault(target, {}):
-            raise CustomError(f"{name}: two tensors patch {target!r}")
-        pairs[target][half] = info["shape"]
-
-    ranks = set()
-    for target, halves in pairs.items():
-        if len(halves) != 2:
-            raise CustomError(f"{name}: {target!r} has only one half of its LoRA pair")
+    def linear(target: str) -> tuple[int, int]:
+        """The out- and in-features of the base model's linear layer ``target``."""
         weight = model.get(f"{fmt.prefix}{target}.weight")
         if weight is None:
             raise CustomError(
@@ -228,6 +223,51 @@ def check_adapter(adapter: Path, base: MediaModel, weights: Path, name: str | No
             if not in_features or (scales.get("shape") or [0, 0])[-1] * group_size != in_features:
                 raise CustomError(f"{base.id}: its quantization is not the one recorded, so adapters cannot "
                                   f"be checked")
+        return out_features, in_features
+
+    pairs: dict[str, dict[str, list[int]]] = {}
+    for key, info in header.items():
+        if fmt.keys is not None:
+            match = re.fullmatch(fmt.keys, key)
+            if match is None:
+                raise CustomError(
+                    f"{name}: {key!r} is not a LoRA weight the engine applies to {base.id}. Only "
+                    f"lora_A/lora_B pairs on its transformer layers (diffusers or ComfyUI naming, no alpha "
+                    f"or other tensors) are supported"
+                )
+            target, half = match["target"], PAIR[match["half"] == "B"]
+        else:
+            renamed = key
+            for old, new in fmt.renames:
+                if old in renamed:
+                    renamed = renamed.replace(old, new)
+            half = next((suffix for suffix in PAIR if renamed.endswith(suffix)), None)
+            if half is None:
+                raise CustomError(
+                    f"{name}: {key!r} is not a LoRA weight. Only adapters with lora_A/lora_B pairs "
+                    f"(PEFT or ComfyUI naming, no alpha or other tensors) are supported"
+                )
+            target = renamed.removesuffix(half)
+        if half in pairs.setdefault(target, {}):
+            raise CustomError(f"{name}: two tensors patch {target!r}")
+        pairs[target][half] = info["shape"]
+
+    ranks, patched = set(), set()
+    for target, halves in pairs.items():
+        if len(halves) != 2:
+            raise CustomError(f"{name}: {target!r} has only one half of its LoRA pair")
+        # A fused target patches its layers, which must take the same input and split its output evenly.
+        layers = next((tuple(target.removesuffix(suffix) + layer for layer in split)
+                       for suffix, split in fmt.splits if target.endswith(f".{suffix}")), (target,))
+        if patched & set(layers):
+            raise CustomError(f"{name}: two tensors patch {sorted(patched & set(layers))[0]!r}")
+        patched.update(layers)
+        shapes = {linear(layer) for layer in layers}
+        if len(shapes) != 1:
+            raise CustomError(f"{name}: {base.id}'s layers under {target!r} differ, so the engine cannot "
+                              f"split it")
+        ((out_features, in_features),) = shapes
+        out_features *= len(layers)
         a, b = halves[PAIR[0]], halves[PAIR[1]]
         if len(a) != 2 or len(b) != 2 or a[0] != b[1] or not 1 <= a[0] <= MAX_RANK:
             raise CustomError(f"{name}: {target!r} is not a LoRA pair of rank 1-{MAX_RANK}")

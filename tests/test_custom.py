@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from media_gen import custom
-from media_gen.catalog import LTX_LORA
+from media_gen.catalog import LTX_LORA, QWEN_LORA
 from media_gen.cli import main as cli_main
 from media_gen.custom import CustomError, ProfileStore, check_adapter, verify_adapter
 from tests.conftest import FAKE_MODELS, fake_model, wait_for_video
@@ -164,6 +164,87 @@ def test_check_adapter_reads_the_engine_names(weights, tmp_path):
         "transformer_blocks.0.ff.net.0.proj.lora_B.weight": ("F32", [256, 8]),
     })
     assert check_adapter(path, BASE, weights) == (8, 1)
+
+
+IMAGE = fake_model("fake-image", adapters=QWEN_LORA)
+BLOCK = "transformer_blocks.0"
+
+
+@pytest.fixture
+def sharded(tmp_path) -> Path:
+    """A diffusers transformer in two shards: attention, and an image MLP with separate gate and up layers."""
+    transformer = tmp_path / "qwen" / "transformer"
+    transformer.mkdir(parents=True)
+    shards = {
+        "model-1.safetensors": {f"{BLOCK}.attn.to_q.weight": ("BF16", [64, 64])},
+        "model-2.safetensors": {
+            f"{BLOCK}.img_mlp.gate_layer.weight": ("BF16", [128, 64]),
+            f"{BLOCK}.img_mlp.proj.weight": ("BF16", [128, 64]),
+            f"{BLOCK}.img_mlp.out.weight": ("BF16", [64, 128]),
+        },
+    }
+    weight_map = {}
+    for shard, tensors in shards.items():
+        write_safetensors(transformer / shard, tensors)
+        weight_map.update(dict.fromkeys(tensors, shard))
+    index = transformer / "diffusion_pytorch_model.safetensors.index.json"
+    index.write_text(json.dumps({"weight_map": weight_map}))
+    return index
+
+
+def qwen_lora(path: Path, **overrides) -> Path:
+    """An ai-toolkit (ComfyUI naming) adapter with a fused gate/up pair, as published for Qwen-Image 2.1."""
+    tensors = {
+        f"diffusion_model.{BLOCK}.attn.to_q.lora_A.weight": ("BF16", [4, 64]),
+        f"diffusion_model.{BLOCK}.attn.to_q.lora_B.weight": ("BF16", [64, 4]),
+        f"diffusion_model.{BLOCK}.img_mlp.gate_up.lora_A.weight": ("BF16", [4, 64]),
+        f"diffusion_model.{BLOCK}.img_mlp.gate_up.lora_B.weight": ("BF16", [256, 4]),
+        f"diffusion_model.{BLOCK}.img_mlp.out.lora_A.weight": ("BF16", [4, 128]),
+        f"diffusion_model.{BLOCK}.img_mlp.out.lora_B.weight": ("BF16", [64, 4]),
+    }
+    for name, value in overrides.items():
+        if value is None:
+            tensors.pop(name)
+        else:
+            tensors[name] = value
+    return write_safetensors(path, tensors)
+
+
+def test_qwen_adapters_are_checked_against_the_sharded_transformer(sharded, tmp_path):
+    assert check_adapter(qwen_lora(tmp_path / "a.safetensors"), IMAGE, sharded) == (4, 3)
+    # diffusers naming, with the gate and up layers as separate pairs.
+    separate = write_safetensors(tmp_path / "b.safetensors", {
+        f"transformer.{BLOCK}.img_mlp.gate_layer.lora_A.weight": ("F32", [8, 64]),
+        f"transformer.{BLOCK}.img_mlp.gate_layer.lora_B.weight": ("F32", [128, 8]),
+        f"transformer.{BLOCK}.img_mlp.proj.lora_A.weight": ("F32", [8, 64]),
+        f"transformer.{BLOCK}.img_mlp.proj.lora_B.weight": ("F32", [128, 8]),
+    })
+    assert check_adapter(separate, IMAGE, sharded) == (8, 2)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        # Names the engine skips: no prefix, the text stream, an alpha tensor.
+        ({f"{BLOCK}.attn.to_k.lora_A.weight": ("BF16", [4, 64])}, "not a LoRA weight the engine applies"),
+        ({f"diffusion_model.{BLOCK}.txt_mlp.out.lora_A.weight": ("BF16", [4, 128])}, "engine applies"),
+        ({f"diffusion_model.{BLOCK}.attn.to_q.alpha": ("BF16", [])}, "engine applies"),
+        ({f"diffusion_model.{BLOCK}.img_mlp.gate_up.lora_B.weight": ("BF16", [128, 4])}, "another model"),
+        ({f"transformer.{BLOCK}.img_mlp.proj.lora_A.weight": ("BF16", [4, 64]),
+          f"transformer.{BLOCK}.img_mlp.proj.lora_B.weight": ("BF16", [128, 4])}, "two tensors patch"),
+        ({f"diffusion_model.{BLOCK}.attn.to_k.lora_A.weight": ("BF16", [4, 64]),
+          f"diffusion_model.{BLOCK}.attn.to_k.lora_B.weight": ("BF16", [64, 4])}, "not a layer"),
+    ],
+)
+def test_qwen_adapters_the_engine_would_not_apply_in_full_are_refused(sharded, tmp_path, overrides, message):
+    with pytest.raises(CustomError, match=message):
+        check_adapter(qwen_lora(tmp_path / "a.safetensors", **overrides), IMAGE, sharded)
+
+
+def test_an_unreadable_checkpoint_index_is_refused(sharded, tmp_path):
+    sharded.write_text("{}")
+    with pytest.raises(CustomError, match="not a readable checkpoint index"):
+        check_adapter(qwen_lora(tmp_path / "a.safetensors"), IMAGE, sharded)
 
 
 def test_enabled_profile_is_served_beside_its_base(make_client, store, settings, weights, tmp_path):

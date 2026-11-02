@@ -76,6 +76,11 @@ class AdapterFormat:
     renames: tuple[tuple[str, str], ...]
     # Unified memory beyond the base model's floor (and the adapter's own size) for fusing it in.
     fusion_gib: int
+    # When the engine reads only the keys it names, instead of renaming any key: a regular expression
+    # that matches each in full, with groups `target` (a layer's name in `weights`) and `half` (A or B).
+    keys: str | None = None
+    # Fused LoRA targets the engine splits evenly by output rows over these layers, as (suffix, layers).
+    splits: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
 
 # ltx-2-mlx 0.18 (ltx_core_mlx.loader.sd_ops.LTXV_LORA_COMFY_RENAMING_MAP): ComfyUI/diffusers names
@@ -96,6 +101,23 @@ LTX_LORA = AdapterFormat(
     # Measured (M3 Ultra): a rank-8 adapter on all 1660 linear layers raised the MLX peak of a 1 s
     # clip from 20.9 to 21.8 GiB; fusion re-quantizes one layer at a time.
     fusion_gib=4,
+)
+
+# mflux 0.24 (mflux.models.qwen21.weights.qwen21_lora_mapping): diffusers or ComfyUI prefixed names on
+# the transformer's attention and image MLP layers, its modulation and timestep embedder. It warns
+# about any other key and skips it. The weights are the diffusers checkpoint's sharded transformer.
+_QWEN_LAYERS = (
+    r"transformer_blocks\.\d+\.(?:attn\.to_(?:q|k|v|out\.0)|img_mlp\.(?:proj|gate_layer|gate_up|out))"
+    r"|modulation\.1|time_text_embed\.timestep_embedder\.linear_[12]"
+)
+QWEN_LORA = AdapterFormat(
+    weights="transformer/diffusion_pytorch_model.safetensors.index.json",
+    prefix="",
+    renames=(),
+    keys=rf"(?:transformer|diffusion_model)\.(?P<target>{_QWEN_LAYERS})\.lora_(?P<half>[AB])\.weight",
+    splits=(("img_mlp.gate_up", ("img_mlp.gate_layer", "img_mlp.proj")),),
+    # The unquantized model takes each layer's update as it loads, then bakes it into the weights.
+    fusion_gib=2,
 )
 
 
@@ -163,6 +185,7 @@ MODELS: dict[str, MediaModel] = {
             # Its native 2K takes over 10 minutes here; 1664x1664 takes about 7.
             max_pixels=1664 * 1664,
             default_steps=40,
+            adapters=QWEN_LORA,
         ),
         MediaModel(
             id="wan2.2-i2v-a14b",

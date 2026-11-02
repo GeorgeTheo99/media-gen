@@ -9,6 +9,8 @@ from typing import Any
 import mlx.core as mx
 from mflux.models.common.config.model_config import ModelConfig
 
+from media_gen.custom import verify_adapter
+
 
 def _model_class(family: str):
     if family == "flux3":
@@ -46,10 +48,18 @@ class MfluxBackend:
     def __init__(self, spec: dict[str, Any]):
         engine = spec["engine"]
         cls = _model_class(engine["family"])
+        # A custom profile's adapter (src/media_gen/custom.py), checked against the base model when
+        # imported, and applied as the model loads.
+        loras = engine.get("loras", [])
+        for lora in loras:
+            verify_adapter(lora)
+        options = {"lora_paths": [lora["path"] for lora in loras],
+                   "lora_scales": [float(lora["strength"]) for lora in loras]} if loras else {}
         self.model = cls(
             model_config=ModelConfig.from_name(engine["mflux_model"]),
             quantize=engine.get("quantize"),
             model_path=spec["paths"][0],
+            **options,
         )
         self.progress = _Progress()
         self.model.callbacks.register(self.progress)
